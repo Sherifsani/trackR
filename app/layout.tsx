@@ -1,8 +1,14 @@
-import { Geist, Geist_Mono, Inter } from "next/font/google"
+import { Geist_Mono, Inter } from "next/font/google"
+import type { Metadata } from "next"
 
 import "./globals.css"
 import { ThemeProvider } from "@/components/theme-provider"
 import { cn } from "@/lib/utils";
+
+export const metadata: Metadata = {
+  title: "trackR — Employee Time Tracking",
+  description: "Employee time tracking and verification platform",
+}
 
 const inter = Inter({subsets:['latin'],variable:'--font-sans'})
 
