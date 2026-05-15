@@ -1,0 +1,125 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Admin {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  createdAt    DateTime @default(now())
+
+  // Team-wide pay defaults (applied to new employees on invite)
+  defaultBreakMinPerDay Int      @default(60)
+  defaultHourlyRate     Decimal? @db.Decimal(10, 2)
+
+  // Squad payroll wallet (set from Squad dashboard)
+  squadVirtualAcctNumber String?
+  squadVirtualAcctBank   String?
+  squadVirtualAcctName   String?
+}
+
+model Employee {
+  id              String    @id @default(cuid())
+  apiId           String    @unique
+  name            String
+  email           String?   @unique
+  role            String?
+  hourlyRate      Decimal?  @db.Decimal(10, 2)
+  breakMinPerDay  Int       @default(60)
+  passwordHash    String?
+  inviteToken     String?   @unique
+  inviteExpiry    DateTime?
+  status          String    @default("pending")  // pending | active
+  createdAt       DateTime  @default(now())
+
+  // Bank details for Squad payouts (verified via account lookup)
+  bankCode        String?
+  bankName        String?
+  accountNumber   String?
+  accountName     String?   // verified name returned by Squad lookup
+  bankVerified    Boolean   @default(false)
+
+  // AI-generated cross-session work pattern insights
+  insightsSummary   Json?
+  insightsUpdatedAt DateTime?
+
+  sessions WorkSession[]
+  payments Payment[]
+}
+
+model Payment {
+  id            String    @id @default(cuid())
+  employeeId    String
+  employee      Employee  @relation(fields: [employeeId], references: [id])
+  amountNgn     Decimal   @db.Decimal(12, 2)
+  amountKobo    Int
+  grossHours    Decimal   @db.Decimal(8, 4)
+  breakHours    Decimal   @db.Decimal(8, 4)
+  netHours      Decimal   @db.Decimal(8, 4)
+  hourlyRate    Decimal   @db.Decimal(10, 2)
+  periodStart   DateTime
+  periodEnd     DateTime
+  status        String    @default("pending")  // pending | paid | failed
+  squadTxRef    String?   @unique
+  squadNipRef   String?
+  failureReason String?
+  paidAt        DateTime?
+  createdAt     DateTime  @default(now())
+
+  @@index([employeeId])
+  @@index([status])
+}
+
+model WalletTopup {
+  id          String    @id @default(cuid())
+  amountKobo  Int
+  amountNgn   Decimal   @db.Decimal(12, 2)
+  squadTxRef  String    @unique
+  status      String    @default("pending")   // pending | confirmed
+  confirmedAt DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([status])
+}
+
+model WorkSession {
+  id         String    @id @default(cuid())
+  employeeId String
+  employee   Employee  @relation(fields: [employeeId], references: [id])
+  clockIn    DateTime  @default(now())
+  clockOut   DateTime?
+  approved       Boolean   @default(false)
+  analysis       Json?
+  analyzedAt     DateTime?
+  breakStartedAt DateTime?
+  breakUsedSec   Int       @default(0)
+  createdAt      DateTime  @default(now())
+
+  events ActivityEvent[]
+
+  @@index([employeeId])
+}
+
+model ActivityEvent {
+  id         String       @id @default(cuid())
+  sessionId  String?
+  session    WorkSession? @relation(fields: [sessionId], references: [id])
+  employeeId String
+  type       String
+  domain     String?
+  title      String?
+  category   String?
+  dwellSec   Int?
+  occurredAt DateTime
+  meta       Json?
+  createdAt  DateTime     @default(now())
+
+  @@index([employeeId, occurredAt])
+  @@index([sessionId])
+}
