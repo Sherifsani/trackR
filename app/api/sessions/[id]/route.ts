@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server"
-import { clockOut } from "@/lib/store"
-import { analyzeSession } from "@/lib/analyze"
-import { getAuth } from "@/lib/auth"
-import { db } from "@/lib/db"
+import { clockOut }                   from "@/lib/store"
+import { analyzeSession }             from "@/lib/analyze"
+import { runWellbeingAnalysis }       from "@/lib/anomaly"
+import { getAuth }                    from "@/lib/auth"
+import { db }                         from "@/lib/db"
 
 export async function PATCH(
   req: NextRequest,
@@ -26,10 +27,15 @@ export async function PATCH(
     await db.workSession.update({ where: { id }, data: { approved: true } })
   } else {
     await clockOut(id)
-    // Fire analysis in background — don't block the clock-out response
+    // Resolve the employee DB id for wellbeing analysis
+    const session = await db.workSession.findUnique({ where: { id }, select: { employeeId: true } })
+    // Fire background tasks — neither blocks the clock-out response
     void analyzeSession(id).catch((err) =>
       console.error("[trackR] Post-clockout analysis failed:", err)
     )
+    if (session) {
+      void runWellbeingAnalysis(session.employeeId).catch(() => {})
+    }
   }
 
   return NextResponse.json({ ok: true })

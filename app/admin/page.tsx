@@ -53,6 +53,33 @@ interface Employee {
   bankVerified:   boolean
   accountName:    string | null
   sessionId:      string | null
+  onBreak:        boolean
+  breakUsedSec:   number
+}
+
+interface LiveEmployeeActivity {
+  employeeId:    string
+  apiId:         string
+  onBreak:       boolean
+  breakUsedSec:  number
+  breakLimitSec: number
+  domain:        string | null
+  category:      string | null
+  title:         string | null
+  ts:            number | null
+}
+
+interface AnomalyFlag {
+  id:        string
+  stream:    "security" | "wellbeing"
+  signal:    string
+  severity:  "low" | "medium" | "high"
+  score:     number
+  message:   string
+  meta:      Record<string, unknown> | null
+  sessionId: string | null
+  createdAt: string
+  employee:  { id: string; name: string; role: string | null }
 }
 
 interface ActivityEvent {
@@ -1170,6 +1197,19 @@ export default function AdminPage() {
   const [analyzingId, setAnalyzingId]               = useState<string | null>(null)
   const [drillSource, setDrillSource]               = useState<"history" | "sessions" | null>(null)
 
+  // ── Live activity feed ────────────────────────────────────────────────────
+  const [liveActivity, setLiveActivity] = useState<Record<string, LiveEmployeeActivity>>({})
+
+  // ── Anomaly flags ─────────────────────────────────────────────────────────
+  const [anomalyFlags,    setAnomalyFlags]    = useState<AnomalyFlag[]>([])
+  const [anomaliesLoaded, setAnomaliesLoaded] = useState(false)
+
+  // ── Session filters ───────────────────────────────────────────────────────
+  const [sessionFrom,           setSessionFrom]           = useState("")
+  const [sessionTo,             setSessionTo]             = useState("")
+  const [sessionEmployeeFilter, setSessionEmployeeFilter] = useState("")
+  const [csvExporting,          setCsvExporting]          = useState(false)
+
   // ── Payments ─────────────────────────────────────────────────────────────
   const [paymentHistory, setPaymentHistory]   = useState<PaymentRecord[]>([])
   const [paymentsLoading, setPaymentsLoading] = useState(false)
@@ -1215,7 +1255,11 @@ export default function AdminPage() {
   const fetchAllSessions = async () => {
     setAllSessionsLoad(true)
     try {
-      const res = await fetch("/api/admin/sessions")
+      const params = new URLSearchParams()
+      if (sessionFrom)           params.set("from",       sessionFrom)
+      if (sessionTo)             params.set("to",         sessionTo)
+      if (sessionEmployeeFilter) params.set("employeeId", sessionEmployeeFilter)
+      const res = await fetch(`/api/admin/sessions?${params}`)
       if (res.ok) setAllSessions((await res.json()).sessions ?? [])
     } catch {}
     setAllSessionsLoad(false)
@@ -1228,6 +1272,77 @@ export default function AdminPage() {
       if (res.ok) setPaymentHistory((await res.json()).payments ?? [])
     } catch {}
     setPaymentsLoading(false)
+  }
+
+  // ── Live activity polling (overview only, every 8 s) ─────────────────────
+  useEffect(() => {
+    if (tab !== "overview" || drillEmp) return
+    const poll = async () => {
+      try {
+        const res = await fetch("/api/admin/live")
+        if (!res.ok) return
+        const { employees: live } = await res.json() as { employees: LiveEmployeeActivity[] }
+        const map: Record<string, LiveEmployeeActivity> = {}
+        for (const e of live) map[e.employeeId] = e
+        setLiveActivity(map)
+      } catch {}
+    }
+    poll()
+    const t = setInterval(poll, 8_000)
+    return () => clearInterval(t)
+  }, [tab, drillEmp])
+
+  // ── Anomaly flags (load once per overview visit) ──────────────────────────
+  useEffect(() => {
+    if (tab !== "overview" || anomaliesLoaded) return
+    fetch("/api/admin/anomalies")
+      .then((r) => r.json())
+      .then((d) => { setAnomalyFlags(d.flags ?? []); setAnomaliesLoaded(true) })
+      .catch(() => {})
+  }, [tab, anomaliesLoaded])
+
+  const resolveAnomaly = async (id: string) => {
+    try {
+      await fetch("/api/admin/anomalies", {
+        method:  "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ id }),
+      })
+      setAnomalyFlags((prev) => prev.filter((f) => f.id !== id))
+    } catch {}
+  }
+
+  // ── Sessions: fetch with filters ──────────────────────────────────────────
+  const fetchFilteredSessions = async () => {
+    setAllSessionsLoad(true)
+    try {
+      const params = new URLSearchParams()
+      if (sessionFrom)           params.set("from",       sessionFrom)
+      if (sessionTo)             params.set("to",         sessionTo)
+      if (sessionEmployeeFilter) params.set("employeeId", sessionEmployeeFilter)
+      const res = await fetch(`/api/admin/sessions?${params}`)
+      if (res.ok) setAllSessions((await res.json()).sessions ?? [])
+    } catch {}
+    setAllSessionsLoad(false)
+  }
+
+  const exportCSV = async () => {
+    setCsvExporting(true)
+    try {
+      const params = new URLSearchParams({ format: "csv" })
+      if (sessionFrom)           params.set("from",       sessionFrom)
+      if (sessionTo)             params.set("to",         sessionTo)
+      if (sessionEmployeeFilter) params.set("employeeId", sessionEmployeeFilter)
+      const res  = await fetch(`/api/admin/sessions?${params}`)
+      const blob = await res.blob()
+      const url  = URL.createObjectURL(blob)
+      const a    = document.createElement("a")
+      a.href     = url
+      a.download = `sessions-${new Date().toISOString().slice(0, 10)}.csv`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch {}
+    setCsvExporting(false)
   }
 
   const handleDisburse = async (employeeId: string) => {
@@ -1286,6 +1401,8 @@ export default function AdminPage() {
       bankVerified:   false,
       accountName:    null,
       sessionId:      s.id,
+      onBreak:        false,
+      breakUsedSec:   0,
     }
     setDrillEmp(emp)
     setDrillSource("sessions")
@@ -1575,6 +1692,69 @@ export default function AdminPage() {
               ))}
             </div>
 
+            {/* Anomaly alerts panel */}
+            {anomalyFlags.length > 0 && (
+              <div className="mb-6 bg-white dark:bg-zinc-900/50 border border-slate-200 dark:border-zinc-800 rounded-2xl overflow-hidden">
+                <div className="px-6 py-4 border-b border-slate-200/80 dark:border-zinc-800/50 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <HugeiconsIcon icon={AlertCircleIcon} size={15} className="text-red-500 dark:text-red-400" />
+                    <h2 className="text-slate-900 dark:text-white text-sm font-semibold">Anomaly Alerts</h2>
+                    <span className="text-[10px] font-mono bg-red-50 dark:bg-red-400/10 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-400/20 px-2 py-0.5 rounded-full">
+                      {anomalyFlags.length}
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => { setAnomaliesLoaded(false) }}
+                    className="text-xs text-slate-400 dark:text-zinc-600 hover:text-slate-600 dark:hover:text-zinc-300 transition-colors"
+                  >
+                    Refresh
+                  </button>
+                </div>
+
+                <div className="divide-y divide-slate-100 dark:divide-zinc-800/30">
+                  {anomalyFlags.map((flag) => {
+                    const severityColor = flag.severity === "high"
+                      ? "text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-400/10 border-red-200 dark:border-red-400/20"
+                      : flag.severity === "medium"
+                        ? "text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-400/10 border-amber-200 dark:border-amber-400/20"
+                        : "text-slate-500 dark:text-zinc-400 bg-slate-50 dark:bg-zinc-800/40 border-slate-200 dark:border-zinc-700/30"
+                    const streamIcon = flag.stream === "security" ? ShieldUserIcon : AiBrain01Icon
+                    const streamColor = flag.stream === "security"
+                      ? "text-violet-500 dark:text-violet-400"
+                      : "text-emerald-500 dark:text-emerald-400"
+
+                    return (
+                      <div key={flag.id} className="px-6 py-3.5 flex items-start gap-4 group">
+                        <HugeiconsIcon icon={streamIcon} size={15} className={`${streamColor} shrink-0 mt-0.5`} />
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-0.5 flex-wrap">
+                            <span className="text-slate-900 dark:text-white text-xs font-medium">{flag.employee.name}</span>
+                            <span className={`inline-flex text-[10px] font-semibold px-1.5 py-0.5 rounded border ${severityColor}`}>
+                              {flag.severity}
+                            </span>
+                            <span className="text-slate-300 dark:text-zinc-700 text-[10px] font-mono capitalize">
+                              {flag.signal.replace(/_/g, " ")}
+                            </span>
+                          </div>
+                          <p className="text-slate-500 dark:text-zinc-400 text-xs leading-relaxed">{flag.message}</p>
+                          <p className="text-slate-300 dark:text-zinc-700 text-[10px] mt-0.5 font-mono">
+                            {new Date(flag.createdAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false })}
+                          </p>
+                        </div>
+                        <button
+                          onClick={() => resolveAnomaly(flag.id)}
+                          className="shrink-0 flex items-center gap-1 text-[11px] text-slate-400 dark:text-zinc-600 hover:text-emerald-600 dark:hover:text-emerald-400 border border-slate-200 dark:border-zinc-800 hover:border-emerald-200 dark:hover:border-emerald-900/60 px-2 py-1 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
+                        >
+                          <HugeiconsIcon icon={CheckmarkCircle01Icon} size={11} className="text-current" />
+                          Resolve
+                        </button>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+
             {/* Employee table */}
             <div className="bg-white dark:bg-zinc-900/50 border border-slate-200 dark:border-zinc-800 rounded-2xl overflow-hidden">
               <div className="px-6 py-4 border-b border-slate-200/80 dark:border-zinc-800/50 flex items-center justify-between">
@@ -1602,6 +1782,8 @@ export default function AdminPage() {
                   {employees.map((emp, i) => {
                     const s          = STATUS_CFG[emp.status]
                     const isApproved = approved[emp.id]
+                    const live       = liveActivity[emp.id]
+                    const breakOverage = emp.status === "active" && emp.breakUsedSec > emp.breakMinPerDay * 60
                     return (
                       <div
                         key={emp.id}
@@ -1611,12 +1793,32 @@ export default function AdminPage() {
 
                         <div className="flex-1 min-w-0">
                           <p className="text-slate-900 dark:text-white text-sm font-medium leading-none">{emp.name}</p>
-                          <p className="text-slate-400 dark:text-zinc-600 text-xs mt-1">{emp.role || "Employee"}</p>
+                          {/* Live current activity or role */}
+                          {emp.status === "active" && live?.domain ? (
+                            <p className="text-xs mt-1 truncate flex items-center gap-1.5">
+                              <span className={`font-medium ${catOf(live.category ?? undefined).color}`}>
+                                {catOf(live.category ?? undefined).icon} {live.domain}
+                              </span>
+                              {live.title && (
+                                <span className="text-slate-300 dark:text-zinc-700 truncate">· {live.title}</span>
+                              )}
+                            </p>
+                          ) : (
+                            <p className="text-slate-400 dark:text-zinc-600 text-xs mt-1">{emp.role || "Employee"}</p>
+                          )}
                         </div>
+
+                        {/* Break overage badge */}
+                        {breakOverage && (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-400/10 border border-red-200 dark:border-red-400/20 px-2 py-1 rounded-full shrink-0">
+                            <HugeiconsIcon icon={ClockAlertIcon} size={10} className="text-current" />
+                            Break +{Math.round((emp.breakUsedSec - emp.breakMinPerDay * 60) / 60)}m over
+                          </span>
+                        )}
 
                         <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs font-medium ${s.text} ${s.bg} ${s.border}`}>
                           <span className={`w-1.5 h-1.5 rounded-full ${s.dot} ${s.pulse ? "animate-pulse" : ""}`} />
-                          {s.label}
+                          {live?.onBreak ? "On Break" : s.label}
                         </div>
 
                         <div className="text-right w-24 hidden md:block">
@@ -1683,18 +1885,72 @@ export default function AdminPage() {
         {/* ── Sessions Tab ── */}
         {!drillEmp && tab === "sessions" && (
           <div className="p-8 max-w-5xl mx-auto w-full">
-            <div className="flex items-start justify-between mb-8">
-              <div>
-                <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">Sessions</h1>
-                <p className="text-slate-400 dark:text-zinc-500 text-sm mt-0.5">All work sessions across your team</p>
+            <div className="mb-6">
+              <div className="flex items-start justify-between mb-4">
+                <div>
+                  <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">Sessions</h1>
+                  <p className="text-slate-400 dark:text-zinc-500 text-sm mt-0.5">All work sessions across your team</p>
+                </div>
+                <button
+                  onClick={exportCSV}
+                  disabled={csvExporting}
+                  className="flex items-center gap-2 text-xs text-slate-500 dark:text-zinc-500 hover:text-slate-700 dark:hover:text-zinc-300 border border-slate-200 dark:border-zinc-800 hover:border-slate-300 dark:hover:border-zinc-700 bg-white dark:bg-zinc-900/50 px-3 py-2 rounded-lg transition-colors disabled:opacity-50"
+                >
+                  <HugeiconsIcon icon={ArrowRight01Icon} size={13} className="text-current" />
+                  {csvExporting ? "Exporting…" : "Export CSV"}
+                </button>
               </div>
-              <button
-                onClick={fetchAllSessions}
-                className="flex items-center gap-2 text-xs text-slate-500 dark:text-zinc-500 hover:text-slate-700 dark:hover:text-zinc-300 border border-slate-200 dark:border-zinc-800 hover:border-slate-300 dark:hover:border-zinc-700 bg-white dark:bg-zinc-900/50 px-3 py-2 rounded-lg transition-colors"
-              >
-                <HugeiconsIcon icon={Activity01Icon} size={13} className="text-current" />
-                Refresh
-              </button>
+
+              {/* Filters row */}
+              <div className="flex flex-wrap gap-3 items-end">
+                <div>
+                  <label className="block text-slate-400 dark:text-zinc-600 text-[10px] uppercase tracking-wider mb-1">From</label>
+                  <input
+                    type="date"
+                    value={sessionFrom}
+                    onChange={(e) => setSessionFrom(e.target.value)}
+                    className="bg-slate-50 dark:bg-zinc-800/60 border border-slate-200 dark:border-zinc-700 focus:border-amber-500/50 rounded-lg px-3 py-1.5 text-slate-900 dark:text-white text-xs outline-none transition-all"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-400 dark:text-zinc-600 text-[10px] uppercase tracking-wider mb-1">To</label>
+                  <input
+                    type="date"
+                    value={sessionTo}
+                    onChange={(e) => setSessionTo(e.target.value)}
+                    className="bg-slate-50 dark:bg-zinc-800/60 border border-slate-200 dark:border-zinc-700 focus:border-amber-500/50 rounded-lg px-3 py-1.5 text-slate-900 dark:text-white text-xs outline-none transition-all"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-400 dark:text-zinc-600 text-[10px] uppercase tracking-wider mb-1">Employee</label>
+                  <select
+                    value={sessionEmployeeFilter}
+                    onChange={(e) => setSessionEmployeeFilter(e.target.value)}
+                    className="bg-slate-50 dark:bg-zinc-800/60 border border-slate-200 dark:border-zinc-700 focus:border-amber-500/50 rounded-lg px-3 py-1.5 text-slate-900 dark:text-white text-xs outline-none transition-all"
+                  >
+                    <option value="">All employees</option>
+                    {employees.map((e) => (
+                      <option key={e.id} value={e.id}>{e.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <button
+                  onClick={fetchFilteredSessions}
+                  disabled={allSessionsLoad}
+                  className="flex items-center gap-1.5 text-xs font-medium bg-amber-400 hover:bg-amber-300 disabled:opacity-50 text-zinc-950 px-3 py-1.5 rounded-lg transition-colors"
+                >
+                  <HugeiconsIcon icon={Activity01Icon} size={12} className="text-current" />
+                  {allSessionsLoad ? "Loading…" : "Apply"}
+                </button>
+                {(sessionFrom || sessionTo || sessionEmployeeFilter) && (
+                  <button
+                    onClick={() => { setSessionFrom(""); setSessionTo(""); setSessionEmployeeFilter("") }}
+                    className="text-xs text-slate-400 dark:text-zinc-600 hover:text-slate-600 dark:hover:text-zinc-300 transition-colors"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
             </div>
 
             {allSessionsLoad ? (

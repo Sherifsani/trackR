@@ -46,6 +46,22 @@ export async function GET() {
     orderBy: { createdAt: "asc" },
   })
 
+  // Enrich active sessions with live break usage
+  const openSessionIds = employees
+    .flatMap((e) => e.sessions)
+    .filter((s) => !s.clockOut)
+    .map((s) => s.id)
+
+  type LiveBreak = { id: string; breakUsedSec: number; breakStartedAt: Date | null }
+  const liveBreaks: Record<string, LiveBreak> = {}
+  if (openSessionIds.length) {
+    const live = await db.workSession.findMany({
+      where:  { id: { in: openSessionIds } },
+      select: { id: true, breakUsedSec: true, breakStartedAt: true },
+    })
+    for (const s of live) liveBreaks[s.id] = s
+  }
+
   const result = employees.map((emp) => {
     const todaySessions = emp.sessions.filter((s) => s.clockIn >= todayStart)
     const openSession   = todaySessions.find((s) => !s.clockOut) ?? null
@@ -94,6 +110,17 @@ export async function GET() {
       bankVerified:  emp.bankVerified,
       accountName:   emp.accountName,
       sessionId:     openSession?.id ?? null,
+      // Break overage data for active employees
+      onBreak:       openSession ? !!liveBreaks[openSession.id]?.breakStartedAt : false,
+      breakUsedSec:  openSession
+        ? (() => {
+            const lb = liveBreaks[openSession.id]
+            if (!lb) return 0
+            return lb.breakStartedAt
+              ? lb.breakUsedSec + Math.floor((now.getTime() - lb.breakStartedAt.getTime()) / 1000)
+              : lb.breakUsedSec
+          })()
+        : 0,
     }
   })
 

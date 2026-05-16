@@ -49,8 +49,9 @@ model Employee {
   insightsSummary   Json?
   insightsUpdatedAt DateTime?
 
-  sessions WorkSession[]
-  payments Payment[]
+  sessions      WorkSession[]
+  payments      Payment[]
+  anomalyFlags  AnomalyFlag[]
 }
 
 model Payment {
@@ -122,4 +123,22 @@ model ActivityEvent {
 
   @@index([employeeId, occurredAt])
   @@index([sessionId])
+}
+
+model AnomalyFlag {
+  id         String    @id @default(cuid())
+  employeeId String
+  employee   Employee  @relation(fields: [employeeId], references: [id])
+  sessionId  String?
+  stream     String    // "security" | "wellbeing"
+  signal     String    // "velocity_anomaly" | "rapid_context_switching" | "off_hours_work" | "context_switching_fatigue" | "engagement_decay"
+  severity   String    // "low" | "medium" | "high"
+  score      Float
+  message    String
+  meta       Json?
+  resolvedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([employeeId])
+  @@index([resolvedAt])
 }
