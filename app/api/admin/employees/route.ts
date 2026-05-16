@@ -95,32 +95,44 @@ export async function GET() {
       status = "absent"
     }
 
+    const liveBreakSec = openSession
+      ? (() => {
+          const lb = liveBreaks[openSession.id]
+          if (!lb) return 0
+          return lb.breakStartedAt
+            ? lb.breakUsedSec + Math.floor((now.getTime() - lb.breakStartedAt.getTime()) / 1000)
+            : lb.breakUsedSec
+        })()
+      : 0
+
+    // Net today seconds = gross minus all break time in today's sessions
+    const todayBreakSec = todaySessions.reduce((sum, s) => {
+      if (openSession && s.id === openSession.id) return sum + liveBreakSec
+      return sum + s.breakUsedSec
+    }, 0)
+    const todayNetSec = Math.max(0, todaySec - todayBreakSec)
+
     return {
-      id:            emp.id,
-      apiId:         emp.apiId,
-      name:          emp.name,
-      initials:      initials(emp.name),
-      role:          emp.role ?? "",
+      id:               emp.id,
+      apiId:            emp.apiId,
+      name:             emp.name,
+      initials:         initials(emp.name),
+      role:             emp.role ?? "",
       status,
-      clockIn:       clockInTime,
-      hours:         fmtHours(todaySec),
-      weekHours:     Math.round((weekSec / 3600) * 100) / 100,
-      hourlyRate:    emp.hourlyRate ? Number(emp.hourlyRate) : 0,
-      breakMinPerDay: emp.breakMinPerDay,
-      bankVerified:  emp.bankVerified,
-      accountName:   emp.accountName,
-      sessionId:     openSession?.id ?? null,
+      clockIn:          clockInTime,
+      hours:            fmtHours(todaySec),
+      weekHours:        Math.round((weekSec / 3600) * 100) / 100,
+      hourlyRate:       emp.hourlyRate ? Number(emp.hourlyRate) : 0,
+      breakMinPerDay:      emp.breakMinPerDay,
+      workHoursPerDay:     emp.workHoursPerDay,
+      overtimeMultiplier:  emp.overtimeMultiplier,
+      bankVerified:     emp.bankVerified,
+      accountName:      emp.accountName,
+      sessionId:        openSession?.id ?? null,
+      todayNetSec,
       // Break overage data for active employees
-      onBreak:       openSession ? !!liveBreaks[openSession.id]?.breakStartedAt : false,
-      breakUsedSec:  openSession
-        ? (() => {
-            const lb = liveBreaks[openSession.id]
-            if (!lb) return 0
-            return lb.breakStartedAt
-              ? lb.breakUsedSec + Math.floor((now.getTime() - lb.breakStartedAt.getTime()) / 1000)
-              : lb.breakUsedSec
-          })()
-        : 0,
+      onBreak:          openSession ? !!liveBreaks[openSession.id]?.breakStartedAt : false,
+      breakUsedSec:     liveBreakSec,
     }
   })
 

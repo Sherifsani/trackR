@@ -35,38 +35,43 @@ import {
 } from "@hugeicons/core-free-icons"
 import { ThemeToggle } from "@/components/theme-toggle"
 
-type TabType = "overview" | "payments" | "sessions" | "settings"
+type TabType = "overview" | "payments" | "sessions" | "settings" | "insights"
 type EmployeeStatus = "active" | "clocked-out" | "absent"
 
 interface Employee {
-  id:             string
-  apiId:          string
-  name:           string
-  initials:       string
-  role:           string
-  status:         EmployeeStatus
-  clockIn:        string
-  hours:          string
-  weekHours:      number
-  hourlyRate:     number
-  breakMinPerDay: number
-  bankVerified:   boolean
-  accountName:    string | null
-  sessionId:      string | null
-  onBreak:        boolean
-  breakUsedSec:   number
+  id:                  string
+  apiId:               string
+  name:                string
+  initials:            string
+  role:                string
+  status:              EmployeeStatus
+  clockIn:             string
+  hours:               string
+  weekHours:           number
+  hourlyRate:          number
+  breakMinPerDay:      number
+  workHoursPerDay:     number
+  overtimeMultiplier:  number | null
+  bankVerified:        boolean
+  accountName:         string | null
+  sessionId:           string | null
+  todayNetSec:         number
+  onBreak:             boolean
+  breakUsedSec:        number
 }
 
 interface LiveEmployeeActivity {
-  employeeId:    string
-  apiId:         string
-  onBreak:       boolean
-  breakUsedSec:  number
-  breakLimitSec: number
-  domain:        string | null
-  category:      string | null
-  title:         string | null
-  ts:            number | null
+  employeeId:     string
+  apiId:          string
+  onBreak:        boolean
+  breakUsedSec:   number
+  breakLimitSec:  number
+  workLimitSec:   number
+  netElapsedSec:  number
+  domain:         string | null
+  category:       string | null
+  title:          string | null
+  ts:             number | null
 }
 
 interface AnomalyFlag {
@@ -126,6 +131,33 @@ interface SessionRecord {
   durationSec: number | null
   analysis:    SessionAnalysis | null
   analyzedAt:  string | null
+}
+
+interface EmployeeOverviewSession {
+  id: string
+  clockIn: string
+  clockOut: string | null
+  durationSec: number | null
+  eventCount: number
+  analysis: SessionAnalysis | null
+}
+interface EmployeeOverviewAnomaly {
+  id: string
+  stream: string
+  signal: string
+  severity: string
+  score: number
+  message: string
+  sessionId: string | null
+  createdAt: string
+}
+interface EmployeeOverviewData {
+  employee: { id: string; name: string; role: string | null }
+  insights: InsightsSummary | null
+  updatedAt: string | null
+  recentSessions: EmployeeOverviewSession[]
+  anomalies: EmployeeOverviewAnomaly[]
+  stats: { totalSessions: number; avgSessionSec: number }
 }
 
 interface AdminSessionRecord extends SessionRecord {
@@ -254,6 +286,38 @@ function Avatar({ initials, idx, sm }: { initials: string; idx: number; sm?: boo
       {initials}
     </div>
   )
+}
+
+function ScoreRing({ score, size = 72 }: { score: number; size?: number }) {
+  const r = 15
+  const circ = 2 * Math.PI * r
+  const filled = (Math.max(0, Math.min(100, score)) / 100) * circ
+  const color = score >= 80 ? "#10b981" : score >= 60 ? "#f59e0b" : score >= 40 ? "#f97316" : "#ef4444"
+  return (
+    <svg width={size} height={size} viewBox="0 0 38 38">
+      <circle cx="19" cy="19" r={r} fill="none" stroke="currentColor" strokeWidth="3" className="text-slate-100 dark:text-zinc-800" />
+      <circle
+        cx="19" cy="19" r={r}
+        fill="none"
+        stroke={color}
+        strokeWidth="3"
+        strokeLinecap="round"
+        strokeDasharray={`${filled} ${circ}`}
+        transform="rotate(-90 19 19)"
+      />
+      <text x="19" y="19" textAnchor="middle" dominantBaseline="central" fontSize="8" fontWeight="700" fill={color}>
+        {score}%
+      </text>
+    </svg>
+  )
+}
+
+function gradeColor(grade?: string) {
+  if (grade === "A") return "bg-emerald-100 text-emerald-700 dark:bg-emerald-400/15 dark:text-emerald-400"
+  if (grade === "B") return "bg-blue-100 text-blue-700 dark:bg-blue-400/15 dark:text-blue-400"
+  if (grade === "C") return "bg-amber-100 text-amber-700 dark:bg-amber-400/15 dark:text-amber-400"
+  if (grade === "D") return "bg-orange-100 text-orange-700 dark:bg-orange-400/15 dark:text-orange-400"
+  return "bg-red-100 text-red-700 dark:bg-red-400/15 dark:text-red-400"
 }
 
 // ── Monitor panel ─────────────────────────────────────────────────────────────
@@ -517,20 +581,24 @@ function InviteModal({ onClose, onInvited }: { onClose: () => void; onInvited: (
 
 // ── Payment record type ───────────────────────────────────────────────────────
 interface PaymentRecord {
-  id:           string
-  employee:     { id: string; name: string; role: string | null }
-  amountNgn:    number
-  grossHours:   number
-  breakHours:   number
-  netHours:     number
-  hourlyRate:   number
-  periodStart:  string
-  periodEnd:    string
-  status:       "pending" | "paid" | "failed"
-  squadTxRef:   string | null
-  paidAt:       string | null
-  createdAt:    string
-  failureReason?: string | null
+  id:                  string
+  employee:            { id: string; name: string; role: string | null }
+  amountNgn:           number
+  grossHours:          number
+  breakHours:          number
+  netHours:            number
+  regularHours:        number
+  overtimeHours:       number
+  overtimeMultiplier:  number
+  overtimeAmountNgn:   number
+  hourlyRate:          number
+  periodStart:         string
+  periodEnd:           string
+  status:              "pending" | "paid" | "failed"
+  squadTxRef:          string | null
+  paidAt:              string | null
+  createdAt:           string
+  failureReason?:      string | null
 }
 
 // ── Payments Tab ─────────────────────────────────────────────────────────────
@@ -704,11 +772,17 @@ function PaymentsTab({
                     <p className="text-slate-800 dark:text-zinc-200 text-sm font-medium">{p.employee.name}</p>
                     <p className="text-slate-400 dark:text-zinc-600 text-xs font-mono">
                       {new Date(p.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-                      {" · "}{p.netHours.toFixed(2)}h net
+                      {" · "}{p.regularHours.toFixed(2)}h reg
+                      {p.overtimeHours > 0 && (
+                        <span className="text-orange-500 dark:text-orange-400"> + {p.overtimeHours.toFixed(2)}h OT ×{p.overtimeMultiplier}</span>
+                      )}
                     </p>
                   </div>
                   <div className="text-right">
                     <p className="text-slate-900 dark:text-white text-sm font-mono font-bold">{fmtNgn(p.amountNgn)}</p>
+                    {p.overtimeHours > 0 && (
+                      <p className="text-orange-500 dark:text-orange-400 text-[10px] font-mono">+{fmtNgn(p.overtimeAmountNgn)} OT bonus</p>
+                    )}
                     <span className={`text-[10px] font-medium ${
                       p.status === "paid"    ? "text-emerald-600 dark:text-emerald-400" :
                       p.status === "failed"  ? "text-red-500 dark:text-red-400" :
@@ -739,12 +813,16 @@ function SettingsTab({ employees, onSaved }: { employees: Employee[]; onSaved: (
   // Global team defaults
   const [defaultBreak,       setDefaultBreak]       = useState("60")
   const [defaultRate,        setDefaultRate]        = useState("")
+  const [defaultWorkHours,   setDefaultWorkHours]   = useState("8")
+  const [defaultOTMulti,     setDefaultOTMulti]     = useState("1.5")
   const [defaultsSaving,     setDefaultsSaving]     = useState(false)
   const [defaultsSaved,      setDefaultsSaved]      = useState(false)
 
   // Per-employee editable rates
-  const [empRates,  setEmpRates]  = useState<Record<string, string>>({})
-  const [empBreaks, setEmpBreaks] = useState<Record<string, string>>({})
+  const [empRates,      setEmpRates]      = useState<Record<string, string>>({})
+  const [empBreaks,     setEmpBreaks]     = useState<Record<string, string>>({})
+  const [empWorkHours,  setEmpWorkHours]  = useState<Record<string, string>>({})
+  const [empOTMulti,    setEmpOTMulti]    = useState<Record<string, string>>({})
   const [saving,    setSaving]    = useState<Record<string, boolean>>({})
 
   const input = "bg-slate-50 dark:bg-zinc-800/60 border border-slate-200 dark:border-zinc-700 focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/20 rounded-lg px-3 py-2 text-slate-900 dark:text-white text-sm outline-none transition-all w-full"
@@ -756,20 +834,28 @@ function SettingsTab({ employees, onSaved }: { employees: Employee[]; onSaved: (
         setBalance(d.walletBalance)
         setDefaultBreak(String(d.defaultBreakMinPerDay ?? 60))
         setDefaultRate(d.defaultHourlyRate ? String(d.defaultHourlyRate) : "")
+        setDefaultWorkHours(String(d.defaultWorkHoursPerDay ?? 8))
+        setDefaultOTMulti(String(d.overtimeMultiplier ?? 1.5))
       })
       .catch(() => {})
       .finally(() => setAcctLoading(false))
   }, [])
 
   useEffect(() => {
-    const rates:  Record<string, string> = {}
-    const breaks: Record<string, string> = {}
+    const rates:      Record<string, string> = {}
+    const breaks:     Record<string, string> = {}
+    const workHours:  Record<string, string> = {}
+    const otMulti:    Record<string, string> = {}
     for (const e of employees) {
-      rates[e.id]  = e.hourlyRate     ? String(e.hourlyRate)     : ""
-      breaks[e.id] = e.breakMinPerDay ? String(e.breakMinPerDay) : "60"
+      rates[e.id]      = e.hourlyRate         ? String(e.hourlyRate)         : ""
+      breaks[e.id]     = e.breakMinPerDay     ? String(e.breakMinPerDay)     : "60"
+      workHours[e.id]  = String(e.workHoursPerDay ?? 8)
+      otMulti[e.id]    = e.overtimeMultiplier != null ? String(e.overtimeMultiplier) : ""
     }
     setEmpRates(rates)
     setEmpBreaks(breaks)
+    setEmpWorkHours(workHours)
+    setEmpOTMulti(otMulti)
   }, [employees])
 
   const checkBalance = async () => {
@@ -811,8 +897,10 @@ function SettingsTab({ employees, onSaved }: { employees: Employee[]; onSaved: (
         method:  "PATCH",
         headers: { "Content-Type": "application/json" },
         body:    JSON.stringify({
-          defaultBreakMinPerDay: defaultBreak ? Number(defaultBreak) : 60,
-          defaultHourlyRate:     defaultRate  ? Number(defaultRate)  : null,
+          defaultBreakMinPerDay:  defaultBreak   ? Number(defaultBreak)   : 60,
+          defaultHourlyRate:      defaultRate    ? Number(defaultRate)    : null,
+          defaultWorkHoursPerDay: defaultWorkHours ? Number(defaultWorkHours) : 8,
+          overtimeMultiplier:     defaultOTMulti ? Number(defaultOTMulti) : 1.5,
         }),
       })
       setDefaultsSaved(true)
@@ -828,8 +916,10 @@ function SettingsTab({ employees, onSaved }: { employees: Employee[]; onSaved: (
         method:  "PATCH",
         headers: { "Content-Type": "application/json" },
         body:    JSON.stringify({
-          hourlyRate:     empRates[empId]  ? Number(empRates[empId])  : undefined,
-          breakMinPerDay: empBreaks[empId] ? Number(empBreaks[empId]) : undefined,
+          hourlyRate:         empRates[empId]     ? Number(empRates[empId])     : undefined,
+          breakMinPerDay:     empBreaks[empId]    ? Number(empBreaks[empId])    : undefined,
+          workHoursPerDay:    empWorkHours[empId] ? Number(empWorkHours[empId]) : undefined,
+          overtimeMultiplier: empOTMulti[empId]   ? Number(empOTMulti[empId])   : null,
         }),
       })
       onSaved()
@@ -853,7 +943,37 @@ function SettingsTab({ employees, onSaved }: { employees: Employee[]; onSaved: (
         <p className="text-slate-400 dark:text-zinc-600 text-xs mb-5">
           Applied to newly invited employees. You can still override these per employee below.
         </p>
-        <div className="grid grid-cols-2 gap-4 mb-4">
+        <div className="grid grid-cols-2 gap-4 mb-4 sm:grid-cols-4">
+          <div>
+            <label className="block text-slate-500 dark:text-zinc-500 text-xs font-medium mb-1.5">
+              Work hours / day
+            </label>
+            <input
+              type="number"
+              min="1"
+              max="24"
+              value={defaultWorkHours}
+              onChange={(e) => setDefaultWorkHours(e.target.value)}
+              placeholder="8"
+              className={input}
+            />
+          </div>
+          <div>
+            <label className="block text-slate-500 dark:text-zinc-500 text-xs font-medium mb-1.5">
+              Overtime rate
+            </label>
+            <input
+              type="number"
+              min="1"
+              max="3"
+              step="0.25"
+              value={defaultOTMulti}
+              onChange={(e) => setDefaultOTMulti(e.target.value)}
+              placeholder="1.5"
+              className={input}
+            />
+            <p className="text-slate-400 dark:text-zinc-600 text-[10px] mt-1">× base rate (e.g. 1.5 = time-and-a-half)</p>
+          </div>
           <div>
             <label className="block text-slate-500 dark:text-zinc-500 text-xs font-medium mb-1.5">
               Break duration (min/day)
@@ -979,6 +1099,31 @@ function SettingsTab({ employees, onSaved }: { employees: Employee[]; onSaved: (
                       onChange={(e) => setEmpRates((p) => ({ ...p, [emp.id]: e.target.value }))}
                       placeholder="5000"
                       className="w-24 bg-slate-50 dark:bg-zinc-800/60 border border-slate-200 dark:border-zinc-700 focus:border-amber-500/50 rounded-lg px-2.5 py-1.5 text-slate-900 dark:text-white text-sm outline-none transition-all"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-400 dark:text-zinc-600 text-[10px] mb-1 uppercase tracking-wider">Hrs / day</label>
+                    <input
+                      type="number"
+                      min="1"
+                      max="24"
+                      value={empWorkHours[emp.id] ?? ""}
+                      onChange={(e) => setEmpWorkHours((p) => ({ ...p, [emp.id]: e.target.value }))}
+                      placeholder="8"
+                      className="w-20 bg-slate-50 dark:bg-zinc-800/60 border border-slate-200 dark:border-zinc-700 focus:border-amber-500/50 rounded-lg px-2.5 py-1.5 text-slate-900 dark:text-white text-sm outline-none transition-all"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-400 dark:text-zinc-600 text-[10px] mb-1 uppercase tracking-wider">OT rate</label>
+                    <input
+                      type="number"
+                      min="1"
+                      max="3"
+                      step="0.25"
+                      value={empOTMulti[emp.id] ?? ""}
+                      onChange={(e) => setEmpOTMulti((p) => ({ ...p, [emp.id]: e.target.value }))}
+                      placeholder="default"
+                      className="w-20 bg-slate-50 dark:bg-zinc-800/60 border border-slate-200 dark:border-zinc-700 focus:border-amber-500/50 rounded-lg px-2.5 py-1.5 text-slate-900 dark:text-white text-sm outline-none transition-all"
                     />
                   </div>
                   <div>
@@ -1215,6 +1360,12 @@ export default function AdminPage() {
   const [paymentsLoading, setPaymentsLoading] = useState(false)
   const [disbursing, setDisbursing]           = useState<Record<string, boolean>>({})
 
+  // ── Insights tab ─────────────────────────────────────────────────────────
+  const [insightEmp,     setInsightEmp]     = useState<Employee | null>(null)
+  const [insightData,    setInsightData]    = useState<EmployeeOverviewData | null>(null)
+  const [insightLoading, setInsightLoading] = useState(false)
+  const [insightRefresh, setInsightRefresh] = useState(false)
+
   const fetchEmployees = useCallback(async () => {
     try {
       const res = await fetch("/api/admin/employees")
@@ -1273,6 +1424,32 @@ export default function AdminPage() {
     } catch {}
     setPaymentsLoading(false)
   }
+
+  const fetchInsightData = useCallback(async (emp: Employee) => {
+    setInsightLoading(true)
+    try {
+      const res = await fetch(`/api/admin/employees/${emp.id}/overview`)
+      if (res.ok) setInsightData((await res.json()) as EmployeeOverviewData)
+    } catch {}
+    setInsightLoading(false)
+  }, [])
+
+  const refreshInsightAnalysis = async () => {
+    if (!insightEmp) return
+    setInsightRefresh(true)
+    try {
+      await fetch(`/api/admin/employees/${insightEmp.id}/overview`, { method: "POST" })
+      const res = await fetch(`/api/admin/employees/${insightEmp.id}/overview`)
+      if (res.ok) setInsightData((await res.json()) as EmployeeOverviewData)
+    } catch {}
+    setInsightRefresh(false)
+  }
+
+  useEffect(() => {
+    if (!insightEmp) return
+    setInsightData(null)
+    fetchInsightData(insightEmp)
+  }, [insightEmp, fetchInsightData])
 
   // ── Live activity polling (overview only, every 8 s) ─────────────────────
   useEffect(() => {
@@ -1397,12 +1574,15 @@ export default function AdminPage() {
       hours:          "—",
       weekHours:      0,
       hourlyRate:     0,
-      breakMinPerDay: 60,
-      bankVerified:   false,
-      accountName:    null,
-      sessionId:      s.id,
-      onBreak:        false,
-      breakUsedSec:   0,
+      breakMinPerDay:     60,
+      workHoursPerDay:    8,
+      overtimeMultiplier: null,
+      bankVerified:       false,
+      accountName:     null,
+      sessionId:       s.id,
+      todayNetSec:     0,
+      onBreak:         false,
+      breakUsedSec:    0,
     }
     setDrillEmp(emp)
     setDrillSource("sessions")
@@ -1539,6 +1719,7 @@ export default function AdminPage() {
               { id: "overview"  as TabType, icon: Home01Icon,      label: "Overview",  badge: null                  },
               { id: "sessions"  as TabType, icon: Calendar01Icon,  label: "Sessions",  badge: null                  },
               { id: "payments"  as TabType, icon: Money01Icon,     label: "Payments",  badge: pendingPayCount || null },
+              { id: "insights"  as TabType, icon: Analytics01Icon, label: "Insights",  badge: null                  },
               { id: "settings"  as TabType, icon: Settings01Icon,  label: "Settings",  badge: null                  },
             ] as const).map((item) => (
               <button
@@ -1549,6 +1730,7 @@ export default function AdminPage() {
                   setDrillSession(null)
                   if (item.id === "sessions") fetchAllSessions()
                   if (item.id === "payments") fetchPaymentHistory()
+                  if (item.id === "insights") { setInsightEmp(null); setInsightData(null) }
                 }}
                 className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors text-left ${
                   tab === item.id
@@ -1783,7 +1965,14 @@ export default function AdminPage() {
                     const s          = STATUS_CFG[emp.status]
                     const isApproved = approved[emp.id]
                     const live       = liveActivity[emp.id]
-                    const breakOverage = emp.status === "active" && emp.breakUsedSec > emp.breakMinPerDay * 60
+                    const breakOverage   = emp.status === "active" && emp.breakUsedSec > emp.breakMinPerDay * 60
+                    // Overtime: net worked seconds today exceed the daily work limit
+                    const workLimitSec   = emp.workHoursPerDay * 3600
+                    const netSec         = emp.status === "active" && live
+                      ? live.netElapsedSec
+                      : emp.todayNetSec
+                    const overtimeSec    = netSec - workLimitSec
+                    const isOvertime     = overtimeSec > 0
                     return (
                       <div
                         key={emp.id}
@@ -1807,6 +1996,16 @@ export default function AdminPage() {
                             <p className="text-slate-400 dark:text-zinc-600 text-xs mt-1">{emp.role || "Employee"}</p>
                           )}
                         </div>
+
+                        {/* Overtime badge */}
+                        {isOvertime && (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-orange-600 dark:text-orange-400 bg-orange-50 dark:bg-orange-400/10 border border-orange-200 dark:border-orange-400/20 px-2 py-1 rounded-full shrink-0">
+                            <HugeiconsIcon icon={Clock01Icon} size={10} className="text-current" />
+                            OT +{Math.floor(overtimeSec / 3600) > 0
+                              ? `${Math.floor(overtimeSec / 3600)}h ${Math.round((overtimeSec % 3600) / 60)}m`
+                              : `${Math.round(overtimeSec / 60)}m`}
+                          </span>
+                        )}
 
                         {/* Break overage badge */}
                         {breakOverage && (
@@ -2428,6 +2627,332 @@ export default function AdminPage() {
         {/* ── Settings ── */}
         {!drillEmp && tab === "settings" && (
           <SettingsTab employees={employees} onSaved={fetchEmployees} />
+        )}
+
+        {/* ── Insights ── */}
+        {!drillEmp && tab === "insights" && (
+          <div className="p-8 max-w-5xl mx-auto w-full">
+
+            {/* ── Employee list ── */}
+            {!insightEmp && (
+              <>
+                <div className="mb-8">
+                  <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">Insights</h1>
+                  <p className="text-slate-400 dark:text-zinc-500 text-sm mt-0.5">
+                    AI-powered performance analysis for each team member
+                  </p>
+                </div>
+
+                {employees.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-24 gap-3 text-center">
+                    <HugeiconsIcon icon={UserGroupIcon} size={32} className="text-slate-300 dark:text-zinc-700" />
+                    <p className="text-slate-400 dark:text-zinc-600 text-sm">No employees yet</p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {employees.map((emp, idx) => {
+                      const ins = emp as Employee & { _insightsSummary?: InsightsSummary }
+                      void ins
+                      return (
+                        <button
+                          key={emp.id}
+                          onClick={() => setInsightEmp(emp)}
+                          className="text-left bg-white dark:bg-zinc-900/60 border border-slate-200 dark:border-zinc-800 rounded-2xl p-5 hover:border-amber-400/50 dark:hover:border-amber-400/30 hover:shadow-md transition-all group"
+                        >
+                          <div className="flex items-start gap-3 mb-4">
+                            <Avatar initials={emp.initials} idx={idx} />
+                            <div className="min-w-0 flex-1">
+                              <p className="text-sm font-semibold text-slate-900 dark:text-white truncate">{emp.name}</p>
+                              <p className="text-xs text-slate-400 dark:text-zinc-500 truncate">{emp.role || "—"}</p>
+                            </div>
+                            <span className={`shrink-0 text-[10px] font-medium px-2 py-0.5 rounded-full border ${STATUS_CFG[emp.status].bg} ${STATUS_CFG[emp.status].text} ${STATUS_CFG[emp.status].border}`}>
+                              {STATUS_CFG[emp.status].label}
+                            </span>
+                          </div>
+
+                          <div className="flex items-center gap-3">
+                            <div className="text-slate-300 dark:text-zinc-700">
+                              <HugeiconsIcon icon={Analytics01Icon} size={28} className="text-current" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs text-slate-500 dark:text-zinc-500">View performance analysis</p>
+                              <p className="text-xs font-medium text-amber-500 dark:text-amber-400 group-hover:underline mt-0.5">
+                                Open Insights →
+                              </p>
+                            </div>
+                          </div>
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
+              </>
+            )}
+
+            {/* ── Employee detail ── */}
+            {insightEmp && (
+              <>
+                {/* Header */}
+                <div className="flex items-center gap-3 mb-6">
+                  <button
+                    onClick={() => { setInsightEmp(null); setInsightData(null) }}
+                    className="flex items-center justify-center w-8 h-8 rounded-lg border border-slate-200 dark:border-zinc-800 text-slate-400 dark:text-zinc-600 hover:text-slate-600 dark:hover:text-zinc-400 hover:bg-slate-50 dark:hover:bg-zinc-800/40 transition-colors"
+                  >
+                    <HugeiconsIcon icon={ArrowLeft01Icon} size={14} className="text-current" />
+                  </button>
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    <Avatar initials={insightEmp.initials} idx={employees.findIndex(e => e.id === insightEmp.id)} />
+                    <div className="min-w-0">
+                      <h1 className="text-xl font-semibold text-slate-900 dark:text-white truncate">{insightEmp.name}</h1>
+                      <p className="text-slate-400 dark:text-zinc-500 text-xs">{insightEmp.role || "Employee"}</p>
+                    </div>
+                    {insightData?.insights?.trend && (
+                      <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${
+                        insightData.insights.trend === "improving" ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-400/15 dark:text-emerald-400" :
+                        insightData.insights.trend === "declining" ? "bg-red-100 text-red-700 dark:bg-red-400/15 dark:text-red-400" :
+                        "bg-slate-100 text-slate-600 dark:bg-zinc-800 dark:text-zinc-400"
+                      }`}>
+                        {insightData.insights.trend === "improving" ? "↑ Improving" :
+                         insightData.insights.trend === "declining" ? "↓ Declining" : "→ Stable"}
+                      </span>
+                    )}
+                  </div>
+                  <button
+                    onClick={refreshInsightAnalysis}
+                    disabled={insightRefresh}
+                    className="flex items-center gap-2 text-xs text-slate-500 dark:text-zinc-500 hover:text-slate-700 dark:hover:text-zinc-300 border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/50 px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50"
+                  >
+                    <HugeiconsIcon icon={RefreshIcon} size={12} className={`text-current ${insightRefresh ? "animate-spin" : ""}`} />
+                    {insightRefresh ? "Analysing…" : "Refresh Analysis"}
+                  </button>
+                </div>
+
+                {insightLoading ? (
+                  <div className="flex items-center justify-center py-24">
+                    <span className="text-slate-400 dark:text-zinc-600 text-sm">Loading insights…</span>
+                  </div>
+                ) : insightData && (
+                  <div className="space-y-6">
+
+                    {/* Stat cards */}
+                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                      {[
+                        {
+                          label: "Total Sessions",
+                          value: insightData.stats.totalSessions.toString(),
+                          sub: `${insightData.recentSessions.filter(s => s.analysis).length} analyzed`,
+                        },
+                        {
+                          label: "Avg Productivity",
+                          value: insightData.insights ? `${insightData.insights.avgProductivePct}%` : "—",
+                          sub: insightData.insights ? `${insightData.insights.sessionCount} sessions` : "No data yet",
+                        },
+                        {
+                          label: "Peak Hours",
+                          value: insightData.insights?.peakHoursLabel || "—",
+                          sub: "Most productive window",
+                        },
+                        {
+                          label: "Avg Session",
+                          value: insightData.stats.avgSessionSec > 0 ? fmtDuration(insightData.stats.avgSessionSec) : "—",
+                          sub: `${Math.round(insightData.stats.avgSessionSec / 60)}m avg work time`,
+                        },
+                      ].map((card) => (
+                        <div key={card.label} className="bg-white dark:bg-zinc-900/60 border border-slate-200 dark:border-zinc-800 rounded-xl p-4">
+                          <p className="text-[10px] text-slate-400 dark:text-zinc-600 uppercase tracking-wider mb-1">{card.label}</p>
+                          <p className="text-xl font-bold text-slate-900 dark:text-white">{card.value}</p>
+                          <p className="text-[11px] text-slate-400 dark:text-zinc-600 mt-0.5">{card.sub}</p>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* AI Insights */}
+                    {insightData.insights?.headline ? (
+                      <div className="bg-white dark:bg-zinc-900/60 border border-slate-200 dark:border-zinc-800 rounded-xl p-5">
+                        <div className="flex items-center gap-2 mb-3">
+                          <HugeiconsIcon icon={AiBrain01Icon} size={16} className="text-amber-500 dark:text-amber-400" />
+                          <span className="text-xs font-semibold text-slate-500 dark:text-zinc-400 uppercase tracking-wider">AI Pattern Analysis</span>
+                          {insightData.updatedAt && (
+                            <span className="ml-auto text-[10px] text-slate-300 dark:text-zinc-700">
+                              Updated {new Date(insightData.updatedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-sm font-semibold text-slate-800 dark:text-white mb-3">{insightData.insights.headline}</p>
+                        <div className="space-y-2">
+                          {insightData.insights.insights?.map((insight, i) => (
+                            <div key={i} className="flex items-start gap-2.5">
+                              <span className="w-5 h-5 rounded-full bg-amber-100 dark:bg-amber-400/15 text-amber-600 dark:text-amber-400 text-[10px] font-bold flex items-center justify-center shrink-0 mt-0.5">{i + 1}</span>
+                              <p className="text-sm text-slate-600 dark:text-zinc-400">{insight}</p>
+                            </div>
+                          ))}
+                        </div>
+                        {insightData.insights.anomalies?.length > 0 && (
+                          <div className="mt-4 pt-4 border-t border-slate-100 dark:border-zinc-800 space-y-2">
+                            {insightData.insights.anomalies.map((a, i) => (
+                              <div key={i} className="flex items-start gap-2 text-sm text-amber-700 dark:text-amber-400">
+                                <HugeiconsIcon icon={AlertCircleIcon} size={14} className="text-current shrink-0 mt-0.5" />
+                                <span>{a}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="bg-slate-50 dark:bg-zinc-900/30 border border-dashed border-slate-200 dark:border-zinc-800 rounded-xl p-6 text-center">
+                        <HugeiconsIcon icon={AiBrain01Icon} size={24} className="text-slate-300 dark:text-zinc-700 mx-auto mb-2" />
+                        <p className="text-sm text-slate-500 dark:text-zinc-500">No AI pattern insights yet</p>
+                        <p className="text-xs text-slate-400 dark:text-zinc-600 mt-1">Needs at least 2 sessions with AI analysis. Click "Refresh Analysis" to generate.</p>
+                      </div>
+                    )}
+
+                    {/* Fatigue + Day of Week */}
+                    {insightData.insights && (
+                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                        {/* Fatigue profile */}
+                        <div className="bg-white dark:bg-zinc-900/60 border border-slate-200 dark:border-zinc-800 rounded-xl p-5">
+                          <p className="text-xs font-semibold text-slate-500 dark:text-zinc-400 uppercase tracking-wider mb-1">Session Fatigue Profile</p>
+                          <p className="text-xs text-slate-400 dark:text-zinc-600 mb-4">Productivity across thirds of each work session</p>
+                          {insightData.insights.fatigueFlag && (
+                            <div className="flex items-center gap-1.5 mb-3 text-xs text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-400/10 px-3 py-1.5 rounded-lg">
+                              <HugeiconsIcon icon={AlertCircleIcon} size={12} className="text-current" />
+                              Significant energy drop detected in later sessions
+                            </div>
+                          )}
+                          {(["Early", "Mid", "Late"] as const).map((label, i) => {
+                            const pct = [
+                              insightData.insights!.fatigueProfile.earlyPct,
+                              insightData.insights!.fatigueProfile.midPct,
+                              insightData.insights!.fatigueProfile.latePct,
+                            ][i]
+                            const barColor = pct >= 70 ? "bg-emerald-400" : pct >= 50 ? "bg-amber-400" : "bg-red-400"
+                            return (
+                              <div key={label} className="mb-3">
+                                <div className="flex justify-between text-xs mb-1">
+                                  <span className="text-slate-600 dark:text-zinc-400">{label} session</span>
+                                  <span className="font-mono text-slate-500 dark:text-zinc-500">{pct}%</span>
+                                </div>
+                                <div className="h-2 bg-slate-100 dark:bg-zinc-800 rounded-full overflow-hidden">
+                                  <div className={`h-full ${barColor} rounded-full transition-all`} style={{ width: `${pct}%` }} />
+                                </div>
+                              </div>
+                            )
+                          })}
+                          <div className="mt-3 pt-3 border-t border-slate-100 dark:border-zinc-800 grid grid-cols-2 gap-2 text-xs text-slate-500 dark:text-zinc-500">
+                            <div>Context switches: <span className="font-mono text-slate-700 dark:text-zinc-300">{insightData.insights.avgContextSwitches}/hr</span></div>
+                            <div>Warm-up time: <span className="font-mono text-slate-700 dark:text-zinc-300">{insightData.insights.avgWarmupMin}m</span></div>
+                          </div>
+                        </div>
+
+                        {/* Day of week */}
+                        <div className="bg-white dark:bg-zinc-900/60 border border-slate-200 dark:border-zinc-800 rounded-xl p-5">
+                          <p className="text-xs font-semibold text-slate-500 dark:text-zinc-400 uppercase tracking-wider mb-1">Day of Week</p>
+                          <p className="text-xs text-slate-400 dark:text-zinc-600 mb-4">Average productivity by weekday</p>
+                          <div className="space-y-2.5">
+                            {["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map((day, d) => {
+                              const entry = insightData.insights!.dayOfWeek.find(x => x.day === d)
+                              const pct   = entry?.productivePct ?? 0
+                              const count = entry?.count ?? 0
+                              if (count === 0) return null
+                              const barColor = pct >= 70 ? "bg-emerald-400" : pct >= 50 ? "bg-amber-400" : "bg-red-400"
+                              return (
+                                <div key={day} className="flex items-center gap-3">
+                                  <span className="text-xs text-slate-500 dark:text-zinc-500 w-7 shrink-0">{day}</span>
+                                  <div className="flex-1 h-2 bg-slate-100 dark:bg-zinc-800 rounded-full overflow-hidden">
+                                    <div className={`h-full ${barColor} rounded-full`} style={{ width: `${pct}%` }} />
+                                  </div>
+                                  <span className="text-xs font-mono text-slate-500 dark:text-zinc-500 w-8 text-right">{pct}%</span>
+                                  <span className="text-[10px] text-slate-300 dark:text-zinc-700 w-10">{count}×</span>
+                                </div>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Recent sessions */}
+                    <div className="bg-white dark:bg-zinc-900/60 border border-slate-200 dark:border-zinc-800 rounded-xl overflow-hidden">
+                      <div className="px-5 py-4 border-b border-slate-100 dark:border-zinc-800 flex items-center justify-between">
+                        <p className="text-sm font-semibold text-slate-800 dark:text-white">Recent Sessions</p>
+                        <span className="text-xs text-slate-400 dark:text-zinc-600">Last {insightData.recentSessions.length}</span>
+                      </div>
+                      {insightData.recentSessions.length === 0 ? (
+                        <div className="px-5 py-8 text-center text-sm text-slate-400 dark:text-zinc-600">No sessions yet</div>
+                      ) : (
+                        <div className="divide-y divide-slate-100 dark:divide-zinc-800">
+                          {insightData.recentSessions.map((s) => {
+                            const analysis = s.analysis as SessionAnalysis | null
+                            return (
+                              <div key={s.id} className="px-5 py-3 flex items-center gap-4">
+                                <div className="min-w-0 flex-1">
+                                  <p className="text-xs font-medium text-slate-700 dark:text-zinc-300">
+                                    {fmtSessionDate(s.clockIn)}
+                                    <span className="font-normal text-slate-400 dark:text-zinc-600 ml-2">{fmtTimeRange(s.clockIn, s.clockOut)}</span>
+                                  </p>
+                                  <p className="text-[11px] text-slate-400 dark:text-zinc-600 mt-0.5">
+                                    {s.durationSec ? fmtDuration(s.durationSec) : "Ongoing"} · {s.eventCount} events
+                                  </p>
+                                </div>
+                                {analysis ? (
+                                  <div className="flex items-center gap-3 shrink-0">
+                                    <ScoreRing score={analysis.score} size={44} />
+                                    <div>
+                                      <span className={`text-xs font-bold px-2 py-0.5 rounded ${gradeColor(analysis.grade)}`}>
+                                        {analysis.grade}
+                                      </span>
+                                      <p className="text-[10px] text-slate-400 dark:text-zinc-600 mt-1">{analysis.productive_pct}% productive</p>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <span className="text-[11px] text-slate-300 dark:text-zinc-700 shrink-0">Not analyzed</span>
+                                )}
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Anomaly flags */}
+                    {insightData.anomalies.length > 0 && (
+                      <div className="bg-white dark:bg-zinc-900/60 border border-slate-200 dark:border-zinc-800 rounded-xl overflow-hidden">
+                        <div className="px-5 py-4 border-b border-slate-100 dark:border-zinc-800 flex items-center gap-2">
+                          <HugeiconsIcon icon={AlertCircleIcon} size={14} className="text-red-500 dark:text-red-400" />
+                          <p className="text-sm font-semibold text-slate-800 dark:text-white">Anomaly Flags</p>
+                          <span className="ml-auto text-xs font-mono bg-red-100 dark:bg-red-400/15 text-red-600 dark:text-red-400 px-2 py-0.5 rounded-full">
+                            {insightData.anomalies.length} unresolved
+                          </span>
+                        </div>
+                        <div className="divide-y divide-slate-100 dark:divide-zinc-800">
+                          {insightData.anomalies.map((flag) => (
+                            <div key={flag.id} className="px-5 py-3 flex items-start gap-3">
+                              <span className={`shrink-0 mt-0.5 text-[10px] font-semibold px-2 py-0.5 rounded-full uppercase ${
+                                flag.severity === "high"   ? "bg-red-100 text-red-700 dark:bg-red-400/15 dark:text-red-400" :
+                                flag.severity === "medium" ? "bg-amber-100 text-amber-700 dark:bg-amber-400/15 dark:text-amber-400" :
+                                "bg-slate-100 text-slate-600 dark:bg-zinc-800 dark:text-zinc-400"
+                              }`}>
+                                {flag.severity}
+                              </span>
+                              <div className="min-w-0 flex-1">
+                                <p className="text-xs font-medium text-slate-700 dark:text-zinc-300">{flag.signal.replace(/_/g, " ")}</p>
+                                <p className="text-xs text-slate-500 dark:text-zinc-500 mt-0.5">{flag.message}</p>
+                              </div>
+                              <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-slate-100 dark:bg-zinc-800 text-slate-500 dark:text-zinc-500`}>
+                                {flag.stream}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                  </div>
+                )}
+              </>
+            )}
+
+          </div>
         )}
 
       </main>

@@ -16,12 +16,14 @@ export async function GET() {
   if (!admin) return NextResponse.json({ error: "Not found" }, { status: 404 })
 
   return NextResponse.json({
-    squadVirtualAcctNumber: admin.squadVirtualAcctNumber,
-    squadVirtualAcctBank:   admin.squadVirtualAcctBank,
-    squadVirtualAcctName:   admin.squadVirtualAcctName,
+    squadVirtualAcctNumber:  admin.squadVirtualAcctNumber,
+    squadVirtualAcctBank:    admin.squadVirtualAcctBank,
+    squadVirtualAcctName:    admin.squadVirtualAcctName,
     walletBalance,
-    defaultBreakMinPerDay:  admin.defaultBreakMinPerDay,
-    defaultHourlyRate:      admin.defaultHourlyRate ? Number(admin.defaultHourlyRate) : null,
+    defaultBreakMinPerDay:   admin.defaultBreakMinPerDay,
+    defaultHourlyRate:       admin.defaultHourlyRate ? Number(admin.defaultHourlyRate) : null,
+    defaultWorkHoursPerDay:  admin.defaultWorkHoursPerDay,
+    overtimeMultiplier:      admin.overtimeMultiplier,
   })
 }
 
@@ -32,21 +34,25 @@ export async function PATCH(req: Request) {
   }
 
   const body = await req.json() as {
-    squadVirtualAcctNumber?: string
-    squadVirtualAcctBank?:   string
-    squadVirtualAcctName?:   string
-    defaultBreakMinPerDay?:  number
-    defaultHourlyRate?:      number | null
+    squadVirtualAcctNumber?:  string
+    squadVirtualAcctBank?:    string
+    squadVirtualAcctName?:    string
+    defaultBreakMinPerDay?:   number
+    defaultHourlyRate?:       number | null
+    defaultWorkHoursPerDay?:  number
+    overtimeMultiplier?:      number
   }
 
   await db.admin.update({
     where: { id: auth.sub },
     data: {
-      squadVirtualAcctNumber: body.squadVirtualAcctNumber ?? undefined,
-      squadVirtualAcctBank:   body.squadVirtualAcctBank   ?? undefined,
-      squadVirtualAcctName:   body.squadVirtualAcctName   ?? undefined,
-      defaultBreakMinPerDay:  body.defaultBreakMinPerDay  ?? undefined,
-      defaultHourlyRate:      body.defaultHourlyRate !== undefined ? body.defaultHourlyRate : undefined,
+      squadVirtualAcctNumber:  body.squadVirtualAcctNumber  ?? undefined,
+      squadVirtualAcctBank:    body.squadVirtualAcctBank    ?? undefined,
+      squadVirtualAcctName:    body.squadVirtualAcctName    ?? undefined,
+      defaultBreakMinPerDay:   body.defaultBreakMinPerDay   ?? undefined,
+      defaultHourlyRate:       body.defaultHourlyRate !== undefined ? body.defaultHourlyRate : undefined,
+      defaultWorkHoursPerDay:  body.defaultWorkHoursPerDay  ?? undefined,
+      overtimeMultiplier:      body.overtimeMultiplier       ?? undefined,
     },
   })
 

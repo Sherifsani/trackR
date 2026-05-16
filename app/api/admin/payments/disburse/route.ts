@@ -40,7 +40,10 @@ export async function POST(req: Request) {
   const pStart = body.periodStart ? new Date(body.periodStart) : startOfWeekUTC(now)
   const pEnd   = body.periodEnd   ? new Date(body.periodEnd)   : endOfWeekUTC(now)
 
-  const emp = await db.employee.findUnique({ where: { id: employeeId } })
+  const [emp, admin] = await Promise.all([
+    db.employee.findUnique({ where: { id: employeeId } }),
+    db.admin.findUnique({ where: { id: auth.sub }, select: { overtimeMultiplier: true, defaultWorkHoursPerDay: true } }),
+  ])
   if (!emp) return NextResponse.json({ error: "Employee not found" }, { status: 404 })
 
   if (!emp.bankVerified || !emp.accountNumber || !emp.bankCode || !emp.accountName) {
@@ -65,19 +68,38 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "No approved sessions found in this period" }, { status: 422 })
   }
 
-  // Calculate gross hours and actual break time taken
-  let grossSec = 0
-  let breakSec = 0
+  // Overtime settings: employee override → admin default → hardcoded fallback
+  const multiplier     = emp.overtimeMultiplier ?? admin?.overtimeMultiplier ?? 1.5
+  const workLimitSec   = emp.workHoursPerDay * 3600
+
+  // Split each session into regular + overtime (per session, not aggregate)
+  let grossSec    = 0
+  let breakSec    = 0
+  let regularSec  = 0
+  let overtimeSec = 0
+
   for (const s of sessions) {
-    grossSec += (s.clockOut!.getTime() - s.clockIn.getTime()) / 1000
-    breakSec += s.breakUsedSec
+    const sessionGross = (s.clockOut!.getTime() - s.clockIn.getTime()) / 1000
+    const sessionBreak = s.breakUsedSec
+    const sessionNet   = Math.max(0, sessionGross - sessionBreak)
+    const sessionReg   = Math.min(sessionNet, workLimitSec)
+    const sessionOT    = sessionNet - sessionReg
+
+    grossSec    += sessionGross
+    breakSec    += sessionBreak
+    regularSec  += sessionReg
+    overtimeSec += sessionOT
   }
 
-  const grossHours = grossSec / 3600
-  const breakHours = breakSec / 3600
-  const netHours   = Math.max(0, grossHours - breakHours)
-  const amountNgn  = netHours * Number(emp.hourlyRate)
-  const amountKobo = Math.round(amountNgn * 100)
+  const grossHours      = grossSec    / 3600
+  const breakHours      = breakSec    / 3600
+  const netHours        = Math.max(0, grossHours - breakHours)
+  const regularHours    = regularSec  / 3600
+  const overtimeHours   = overtimeSec / 3600
+  const rate            = Number(emp.hourlyRate)
+  const overtimeAmountNgn = overtimeHours * rate * (multiplier - 1)  // extra on top of base rate
+  const amountNgn       = netHours * rate + overtimeAmountNgn
+  const amountKobo      = Math.round(amountNgn * 100)
 
   if (amountKobo < 100) {
     return NextResponse.json({ error: "Calculated amount too small to transfer (minimum ₦1)" }, { status: 422 })
@@ -106,10 +128,14 @@ export async function POST(req: Request) {
       grossHours,
       breakHours,
       netHours,
-      hourlyRate: emp.hourlyRate,
+      regularHours,
+      overtimeHours,
+      overtimeMultiplier: multiplier,
+      overtimeAmountNgn,
+      hourlyRate:  emp.hourlyRate,
       periodStart: pStart,
       periodEnd:   pEnd,
-      status:     "pending",
+      status:      "pending",
       squadTxRef,
     },
   })
@@ -146,9 +172,9 @@ export async function POST(req: Request) {
     const reason = err instanceof Error ? err.message : "Transfer failed"
     const isSandbox = (process.env.SQUAD_BASE_URL ?? "").includes("sandbox")
 
-    // Simulate success in sandbox when Squad is unreachable or merchant not yet eligible.
+    // Simulate success in sandbox when Squad is unreachable or merchant not yet approved.
     const isNetworkErr  = reason === "fetch failed" || reason.toLowerCase().includes("enotfound") || reason.toLowerCase().includes("etimedout")
-    const isEligibleErr = reason.toLowerCase().includes("not eligible")
+    const isEligibleErr = reason.toLowerCase().includes("not eligible") || reason.toLowerCase().includes("not profiled") || reason.toLowerCase().includes("not activated") || reason.toLowerCase().includes("not enabled")
     if (isSandbox && (isNetworkErr || isEligibleErr)) {
       await db.payment.update({
         where: { id: payment.id },

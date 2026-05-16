@@ -15,8 +15,10 @@ model Admin {
   createdAt    DateTime @default(now())
 
   // Team-wide pay defaults (applied to new employees on invite)
-  defaultBreakMinPerDay Int      @default(60)
-  defaultHourlyRate     Decimal? @db.Decimal(10, 2)
+  defaultBreakMinPerDay    Int      @default(60)
+  defaultHourlyRate        Decimal? @db.Decimal(10, 2)
+  defaultWorkHoursPerDay   Int      @default(8)
+  overtimeMultiplier       Float    @default(1.5)
 
   // Squad payroll wallet (set from Squad dashboard)
   squadVirtualAcctNumber String?
@@ -31,7 +33,9 @@ model Employee {
   email           String?   @unique
   role            String?
   hourlyRate      Decimal?  @db.Decimal(10, 2)
-  breakMinPerDay  Int       @default(60)
+  breakMinPerDay     Int       @default(60)
+  workHoursPerDay    Int       @default(8)
+  overtimeMultiplier Float?    // null = use admin's team default
   passwordHash    String?
   inviteToken     String?   @unique
   inviteExpiry    DateTime?
@@ -60,10 +64,14 @@ model Payment {
   employee      Employee  @relation(fields: [employeeId], references: [id])
   amountNgn     Decimal   @db.Decimal(12, 2)
   amountKobo    Int
-  grossHours    Decimal   @db.Decimal(8, 4)
-  breakHours    Decimal   @db.Decimal(8, 4)
-  netHours      Decimal   @db.Decimal(8, 4)
-  hourlyRate    Decimal   @db.Decimal(10, 2)
+  grossHours         Decimal  @db.Decimal(8, 4)
+  breakHours         Decimal  @db.Decimal(8, 4)
+  netHours           Decimal  @db.Decimal(8, 4)
+  regularHours       Decimal  @default(0) @db.Decimal(8, 4)
+  overtimeHours      Decimal  @default(0) @db.Decimal(8, 4)
+  overtimeMultiplier Float    @default(1.5)
+  overtimeAmountNgn  Decimal  @default(0) @db.Decimal(12, 2)
+  hourlyRate         Decimal  @db.Decimal(10, 2)
   periodStart   DateTime
   periodEnd     DateTime
   status        String    @default("pending")  // pending | paid | failed

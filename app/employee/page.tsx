@@ -1024,14 +1024,14 @@ export default function EmployeePage() {
   const [onBreak, setOnBreak] = useState(false)
   const [breakStartedMs, setBreakStartedMs] = useState(0)
   const [breakUsedSec, setBreakUsedSec] = useState(0)
-  const [breakMinPerDay, setBreakMinPerDay] = useState(60)
+  const [breakMinPerDay,      setBreakMinPerDay]      = useState(60)
+  const [workHoursPerDay,     setWorkHoursPerDay]     = useState(8)
+  const [hourlyRate,          setHourlyRate]          = useState<number | null>(null)
+  const [overtimeMultiplier,  setOvertimeMultiplier]  = useState(1.5)
   const [breakLoading, setBreakLoading] = useState(false)
   const [clockingOut, setClockingOut] = useState(false)
 
   // ── Extension connectivity ───────────────────────────────────────────────
-  // null = still checking, true = connected, false = not installed/connected
-  const [extConnected, setExtConnected] = useState<boolean | null>(null)
-
   // ── Guide modal ──────────────────────────────────────────────────────────
   const [guideOpen, setGuideOpen] = useState(false)
 
@@ -1058,7 +1058,16 @@ export default function EmployeePage() {
           Math.floor((now.getTime() - clockInMs) / 1000) - totalBreakSec
         )
       : 0
-  const breakRemainSec = Math.max(0, breakMinPerDay * 60 - totalBreakSec)
+  const breakRemainSec   = Math.max(0, breakMinPerDay * 60 - totalBreakSec)
+  const workLimitSec     = workHoursPerDay * 3600
+  const overtimeSec      = Math.max(0, elapsed - workLimitSec)
+  const finalOvertimeSec = Math.max(0, finalElapsed - workLimitSec)
+  const finalRegularSec  = Math.min(finalElapsed, workLimitSec)
+
+  // Pay estimates for clocked-out summary (only shown if hourly rate is set)
+  const regularPay  = hourlyRate != null ? (finalRegularSec  / 3600) * hourlyRate : null
+  const overtimePay = hourlyRate != null ? (finalOvertimeSec / 3600) * hourlyRate * (overtimeMultiplier - 1) : null
+  const totalPay    = regularPay != null && overtimePay != null ? regularPay + overtimePay : null
 
   // ── Tick ────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -1092,9 +1101,12 @@ export default function EmployeePage() {
         const { session } = await sr.json()
         if (session)
           restoreSession(session.id, session.clockIn, {
-            breakStartedAt: session.breakStartedAt,
-            breakUsedSec: session.breakUsedSec,
-            breakMinPerDay: session.breakMinPerDay,
+            breakStartedAt:     session.breakStartedAt,
+            breakUsedSec:       session.breakUsedSec,
+            breakMinPerDay:     session.breakMinPerDay,
+            workHoursPerDay:    session.workHoursPerDay,
+            hourlyRate:         session.hourlyRate,
+            overtimeMultiplier: session.overtimeMultiplier,
           })
       })
       .catch(() => router.push("/login?from=/employee"))
@@ -1125,39 +1137,6 @@ export default function EmployeePage() {
   }, [])
 
   // ── Extension connectivity detection ─────────────────────────────────────
-  // Content script sets data-trackr-ext="1" on <html> the instant it loads.
-  // MutationObserver catches it if the content script loads after this effect.
-  useEffect(() => {
-    const check = () => document.documentElement.hasAttribute('data-trackr-ext')
-
-    if (check()) {
-      setExtConnected(true)
-      return
-    }
-
-    const observer = new MutationObserver(() => {
-      if (check()) {
-        setExtConnected(true)
-        observer.disconnect()
-        clearTimeout(fallback)
-      }
-    })
-    observer.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ['data-trackr-ext'],
-    })
-
-    const fallback = setTimeout(() => {
-      observer.disconnect()
-      if (!check()) setExtConnected(false)
-    }, 2000)
-
-    return () => {
-      observer.disconnect()
-      clearTimeout(fallback)
-    }
-  }, [])
-
   // ── Live activity poll ───────────────────────────────────────────────────
   useEffect(() => {
     if (state !== "active" || !me) return
@@ -1237,9 +1216,12 @@ export default function EmployeePage() {
     sid: string,
     clockInISO: string,
     opts?: {
-      breakStartedAt?: string | null
-      breakUsedSec?: number
-      breakMinPerDay?: number
+      breakStartedAt?:     string | null
+      breakUsedSec?:       number
+      breakMinPerDay?:     number
+      workHoursPerDay?:    number
+      hourlyRate?:         number | null
+      overtimeMultiplier?: number | null
     }
   ) {
     const ms = new Date(clockInISO).getTime()
@@ -1252,7 +1234,10 @@ export default function EmployeePage() {
     setState("active")
     // Restore break state
     setBreakUsedSec(opts?.breakUsedSec ?? 0)
-    if (opts?.breakMinPerDay) setBreakMinPerDay(opts.breakMinPerDay)
+    if (opts?.breakMinPerDay)              setBreakMinPerDay(opts.breakMinPerDay)
+    if (opts?.workHoursPerDay)             setWorkHoursPerDay(opts.workHoursPerDay)
+    if (opts?.hourlyRate        !== undefined) setHourlyRate(opts.hourlyRate ?? null)
+    if (opts?.overtimeMultiplier != null)  setOvertimeMultiplier(opts.overtimeMultiplier)
     if (opts?.breakStartedAt) {
       setOnBreak(true)
       setBreakStartedMs(new Date(opts.breakStartedAt).getTime())
@@ -1603,207 +1588,7 @@ export default function EmployeePage() {
               {/* IDLE */}
               {state === "idle" && (
                 <>
-                  {/* ── Extension install guide (shown until extension connects) ── */}
-                  {extConnected === false && (
-                    <div className="flex animate-in flex-col items-center gap-6 duration-300 fade-in slide-in-from-bottom-2">
-                      {/* Header */}
-                      <div className="text-center">
-                        <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-amber-400/10 ring-1 ring-amber-400/30">
-                          <span className="text-2xl">🧩</span>
-                        </div>
-                        <h1 className="text-xl font-semibold text-slate-900 dark:text-white">
-                          Install the trackR extension
-                        </h1>
-                        <p className="mt-1 text-sm text-slate-500 dark:text-zinc-500">
-                          The browser extension tracks your activity during work
-                          sessions.
-                          <br />
-                          Follow the steps below — it only takes a minute.
-                        </p>
-                      </div>
-
-                      {/* Steps card */}
-                      <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white dark:border-zinc-800 dark:bg-zinc-900/60">
-                        {/* Step 1 — Download */}
-                        <div className="flex items-start gap-4 border-b border-slate-100 p-5 dark:border-zinc-800">
-                          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-amber-400 text-xs font-bold text-zinc-950">
-                            1
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <p className="text-sm font-semibold text-slate-800 dark:text-white">
-                              Download the extension
-                            </p>
-                            <p className="mt-0.5 text-xs text-slate-500 dark:text-zinc-500">
-                              Click below to download the extension package.
-                            </p>
-                            <a
-                              href="/trackr-extension.zip"
-                              download="trackr-extension.zip"
-                              className="mt-3 inline-flex items-center gap-2 rounded-lg bg-amber-400 px-4 py-2 text-xs font-semibold text-zinc-950 transition-colors hover:bg-amber-300"
-                            >
-                              <HugeiconsIcon
-                                icon={Activity01Icon}
-                                size={13}
-                                className="text-current"
-                              />
-                              Download trackR Extension
-                            </a>
-                          </div>
-                        </div>
-
-                        {/* Step 2 — Unzip */}
-                        <div className="flex items-start gap-4 border-b border-slate-100 p-5 dark:border-zinc-800">
-                          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-100 text-xs font-bold text-slate-600 dark:bg-zinc-800 dark:text-zinc-300">
-                            2
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <p className="text-sm font-semibold text-slate-800 dark:text-white">
-                              Unzip the file
-                            </p>
-                            <p className="mt-0.5 text-xs text-slate-500 dark:text-zinc-500">
-                              Extract the downloaded{" "}
-                              <span className="font-mono text-slate-700 dark:text-zinc-300">
-                                trackr-extension.zip
-                              </span>{" "}
-                              to any folder on your computer.
-                            </p>
-                          </div>
-                        </div>
-
-                        {/* Step 3 — Open Extensions */}
-                        <div className="flex items-start gap-4 border-b border-slate-100 p-5 dark:border-zinc-800">
-                          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-100 text-xs font-bold text-slate-600 dark:bg-zinc-800 dark:text-zinc-300">
-                            3
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <p className="text-sm font-semibold text-slate-800 dark:text-white">
-                              Open Chrome Extensions
-                            </p>
-                            <p className="mt-0.5 text-xs text-slate-500 dark:text-zinc-500">
-                              In Chrome, paste this into the address bar and
-                              press Enter:
-                            </p>
-                            <div className="mt-2 flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 dark:border-zinc-700 dark:bg-zinc-800">
-                              <code className="flex-1 text-xs text-slate-700 select-all dark:text-zinc-300">
-                                chrome://extensions
-                              </code>
-                              <button
-                                onClick={() =>
-                                  navigator.clipboard.writeText(
-                                    "chrome://extensions"
-                                  )
-                                }
-                                className="shrink-0 rounded text-xs text-slate-400 hover:text-slate-600 dark:hover:text-zinc-200"
-                              >
-                                Copy
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Step 4 — Developer mode */}
-                        <div className="flex items-start gap-4 border-b border-slate-100 p-5 dark:border-zinc-800">
-                          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-100 text-xs font-bold text-slate-600 dark:bg-zinc-800 dark:text-zinc-300">
-                            4
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <p className="text-sm font-semibold text-slate-800 dark:text-white">
-                              Enable Developer Mode
-                            </p>
-                            <p className="mt-0.5 text-xs text-slate-500 dark:text-zinc-500">
-                              Toggle{" "}
-                              <span className="font-semibold text-slate-700 dark:text-zinc-300">
-                                Developer mode
-                              </span>{" "}
-                              on in the top-right corner of the extensions page.
-                            </p>
-                          </div>
-                        </div>
-
-                        {/* Step 5 — Load unpacked */}
-                        <div className="flex items-start gap-4 border-b border-slate-100 p-5 dark:border-zinc-800">
-                          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-100 text-xs font-bold text-slate-600 dark:bg-zinc-800 dark:text-zinc-300">
-                            5
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <p className="text-sm font-semibold text-slate-800 dark:text-white">
-                              Load the extension
-                            </p>
-                            <p className="mt-0.5 text-xs text-slate-500 dark:text-zinc-500">
-                              Click{" "}
-                              <span className="font-semibold text-slate-700 dark:text-zinc-300">
-                                Load unpacked
-                              </span>{" "}
-                              and select the folder you unzipped in step 2.
-                            </p>
-                          </div>
-                        </div>
-
-                        {/* Step 6 — Pin it */}
-                        <div className="flex items-start gap-4 border-b border-slate-100 p-5 dark:border-zinc-800">
-                          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-100 text-xs font-bold text-slate-600 dark:bg-zinc-800 dark:text-zinc-300">
-                            6
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <p className="text-sm font-semibold text-slate-800 dark:text-white">
-                              Pin the extension
-                            </p>
-                            <p className="mt-0.5 text-xs text-slate-500 dark:text-zinc-500">
-                              Click the puzzle piece icon{" "}
-                              <span className="font-mono text-slate-700 dark:text-zinc-300">
-                                🧩
-                              </span>{" "}
-                              in the Chrome toolbar, find{" "}
-                              <span className="font-semibold text-slate-700 dark:text-zinc-300">
-                                trackR Monitor
-                              </span>
-                              , and click the pin icon. This lets you see your
-                              live tracking status at a glance.
-                            </p>
-                          </div>
-                        </div>
-
-                        {/* Step 7 — Reload */}
-                        <div className="flex items-start gap-4 p-5">
-                          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-100 text-xs font-bold text-slate-600 dark:bg-zinc-800 dark:text-zinc-300">
-                            7
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <p className="text-sm font-semibold text-slate-800 dark:text-white">
-                              Come back and reload
-                            </p>
-                            <p className="mt-0.5 text-xs text-slate-500 dark:text-zinc-500">
-                              Return to this page and click below. The extension
-                              connects automatically — this page will update and
-                              let you clock in.
-                            </p>
-                            <button
-                              onClick={() => window.location.reload()}
-                              className="mt-3 inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
-                            >
-                              <HugeiconsIcon
-                                icon={RefreshIcon}
-                                size={13}
-                                className="text-current"
-                              />
-                              Reload page
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Note about clocking in */}
-                      <p className="max-w-md text-center text-xs text-slate-400 dark:text-zinc-600">
-                        Once installed, you clock in directly from this
-                        dashboard — not from the extension popup. Pinning just
-                        gives you a live status indicator in your toolbar.
-                      </p>
-                    </div>
-                  )}
-
-                  {/* ── Normal idle state (extension connected or still checking) ── */}
-                  {extConnected !== false && (
-                    <div className="flex animate-in flex-col items-center gap-8 duration-300 fade-in slide-in-from-bottom-2">
+                  <div className="flex animate-in flex-col items-center gap-8 duration-300 fade-in slide-in-from-bottom-2">
                       <div className="pt-4 text-center">
                         <div className="font-mono text-6xl font-bold tracking-tight text-slate-900 tabular-nums sm:text-7xl dark:text-white">
                           {timeStr}
@@ -1822,7 +1607,7 @@ export default function EmployeePage() {
                       </div>
                       <button
                         onClick={handleClockIn}
-                        disabled={!me || extConnected === null}
+                        disabled={!me}
                         className="group flex items-center gap-3 rounded-2xl bg-amber-400 px-12 py-4 text-lg font-semibold text-zinc-950 transition-all duration-200 hover:bg-amber-300 hover:shadow-xl hover:shadow-amber-400/20 active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         <HugeiconsIcon
@@ -1851,25 +1636,8 @@ export default function EmployeePage() {
                             Activity captured once clocked in
                           </p>
                         </div>
-                        <div className="flex shrink-0 items-center gap-1.5 text-xs">
-                          {extConnected === true ? (
-                            <span className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400">
-                              <HugeiconsIcon
-                                icon={CheckmarkCircle01Icon}
-                                size={14}
-                                className="text-current"
-                              />
-                              Extension connected
-                            </span>
-                          ) : (
-                            <span className="text-slate-400 dark:text-zinc-500">
-                              Checking…
-                            </span>
-                          )}
-                        </div>
                       </div>
                     </div>
-                  )}
                 </>
               )}
 
@@ -1892,12 +1660,21 @@ export default function EmployeePage() {
                       </>
                     ) : (
                       <>
-                        <p className="mb-4 font-mono text-xs tracking-[0.25em] text-slate-400 uppercase dark:text-zinc-600">
-                          Active Session
+                        <p className="mb-4 font-mono text-xs tracking-[0.25em] uppercase dark:text-zinc-600 text-slate-400">
+                          {overtimeSec > 0 ? "Overtime" : "Active Session"}
                         </p>
-                        <div className="font-mono text-7xl leading-none font-bold tracking-tight text-amber-500 tabular-nums sm:text-8xl dark:text-amber-400">
+                        <div className={`font-mono text-7xl leading-none font-bold tracking-tight tabular-nums sm:text-8xl ${
+                          overtimeSec > 0
+                            ? "text-orange-500 dark:text-orange-400"
+                            : "text-amber-500 dark:text-amber-400"
+                        }`}>
                           {fmtSec(elapsed)}
                         </div>
+                        {overtimeSec > 0 && (
+                          <p className="mt-3 font-mono text-sm font-semibold text-orange-500 dark:text-orange-400">
+                            +{fmtSec(overtimeSec)} over {workHoursPerDay}h limit
+                          </p>
+                        )}
                         <p className="mt-4 text-sm text-slate-400 dark:text-zinc-600">
                           Clocked in at{" "}
                           <span className="font-mono text-slate-600 dark:text-zinc-400">
@@ -2072,9 +1849,7 @@ export default function EmployeePage() {
                           {clockInTimeStr}
                         </span>
                       </span>
-                      <span className="text-slate-200 dark:text-zinc-800">
-                        ·
-                      </span>
+                      <span className="text-slate-200 dark:text-zinc-800">·</span>
                       <span>
                         Out:{" "}
                         <span className="font-mono text-slate-600 dark:text-zinc-400">
@@ -2087,6 +1862,48 @@ export default function EmployeePage() {
                       </span>
                     </div>
                   </div>
+
+                  {/* Overtime breakdown */}
+                  {finalOvertimeSec > 0 && (
+                    <div className="rounded-2xl border border-orange-200 bg-orange-50 p-5 dark:border-orange-400/20 dark:bg-orange-400/5">
+                      <div className="flex items-center justify-between mb-4">
+                        <div className="flex items-center gap-2">
+                          <HugeiconsIcon icon={Clock01Icon} size={14} className="text-orange-500 dark:text-orange-400 shrink-0" />
+                          <span className="text-orange-600 dark:text-orange-400 text-xs font-semibold uppercase tracking-wider">Overtime</span>
+                        </div>
+                        {totalPay != null && (
+                          <span className="font-mono text-sm font-bold text-orange-600 dark:text-orange-400">
+                            ₦{totalPay.toLocaleString("en-NG", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </span>
+                        )}
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="bg-white/60 dark:bg-zinc-900/40 rounded-xl p-3.5 text-center">
+                          <p className="text-slate-400 dark:text-zinc-500 text-[10px] uppercase tracking-wider mb-1">Regular</p>
+                          <p className="font-mono text-base font-bold text-slate-800 dark:text-zinc-200">{fmtSec(finalRegularSec)}</p>
+                          {regularPay != null && (
+                            <p className="font-mono text-xs text-slate-400 dark:text-zinc-500 mt-0.5">
+                              ₦{regularPay.toLocaleString("en-NG", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </p>
+                          )}
+                        </div>
+                        <div className="bg-orange-100/60 dark:bg-orange-400/10 rounded-xl p-3.5 text-center">
+                          <p className="text-orange-500 dark:text-orange-400 text-[10px] uppercase tracking-wider mb-1">Overtime ×{overtimeMultiplier}</p>
+                          <p className="font-mono text-base font-bold text-orange-600 dark:text-orange-400">+{fmtSec(finalOvertimeSec)}</p>
+                          {overtimePay != null && (
+                            <p className="font-mono text-xs text-orange-500/80 dark:text-orange-400/70 mt-0.5">
+                              +₦{overtimePay.toLocaleString("en-NG", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                      <p className="text-orange-500/70 dark:text-orange-400/60 text-xs mt-3 text-center">
+                        {hourlyRate == null
+                          ? "Your admin will see the overtime on their dashboard."
+                          : `Estimate based on ₦${hourlyRate.toLocaleString("en-NG")}/hr · admin approves final payment.`}
+                      </p>
+                    </div>
+                  )}
 
                   {summaryCategories.length > 0 && (
                     <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-zinc-800 dark:bg-zinc-900/50">

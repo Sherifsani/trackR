@@ -19,7 +19,8 @@ export async function GET() {
       employeeId: true,
       breakStartedAt: true,
       breakUsedSec:   true,
-      employee:   { select: { id: true, apiId: true, breakMinPerDay: true } },
+      clockIn:    true,
+      employee:   { select: { id: true, apiId: true, breakMinPerDay: true, workHoursPerDay: true } },
     },
   })
 
@@ -46,16 +47,21 @@ export async function GET() {
         ? s.breakUsedSec + Math.floor((Date.now() - s.breakStartedAt.getTime()) / 1000)
         : s.breakUsedSec
 
+      const elapsedSec    = Math.floor((Date.now() - s.clockIn.getTime()) / 1000)
+      const netElapsedSec = Math.max(0, elapsedSec - nowBreakSec)
+
       return {
-        employeeId:     s.employee.id,
-        apiId:          s.employee.apiId,
-        onBreak:        !!s.breakStartedAt,
-        breakUsedSec:   nowBreakSec,
-        breakLimitSec:  s.employee.breakMinPerDay * 60,
-        domain:         latest?.domain   ?? null,
-        category:       latest?.category ?? null,
-        title:          latest?.title    ?? null,
-        ts:             latest?.occurredAt.getTime() ?? null,
+        employeeId:      s.employee.id,
+        apiId:           s.employee.apiId,
+        onBreak:         !!s.breakStartedAt,
+        breakUsedSec:    nowBreakSec,
+        breakLimitSec:   s.employee.breakMinPerDay * 60,
+        workLimitSec:    s.employee.workHoursPerDay * 3600,
+        netElapsedSec,
+        domain:          latest?.domain   ?? null,
+        category:        latest?.category ?? null,
+        title:           latest?.title    ?? null,
+        ts:              latest?.occurredAt.getTime() ?? null,
       }
     }),
   )
