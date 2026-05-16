@@ -1,6 +1,7 @@
-import { NextRequest, NextResponse } from "next/server"
+import { NextRequest, NextResponse }                         from "next/server"
 import { appendEvents, getEvents, getSummary, ActivityEvent } from "@/lib/store"
-import { getAuth } from "@/lib/auth"
+import { getAuth }                                            from "@/lib/auth"
+import { runSecurityAnalysis }                                from "@/lib/anomaly"
 
 interface ActivityPayload {
   employeeId: string
@@ -45,6 +46,9 @@ export async function POST(req: NextRequest) {
 
   const tabVisitCount = events.filter(e => e.type === "tab_visit").length
   console.log(`[trackR] ✓ Stored ${events.length} events (${tabVisitCount} tab_visit) from ${employeeId}`)
+
+  // Run security anomaly detection asynchronously — never blocks the response
+  runSecurityAnalysis(employeeId, sessionId ?? null, events).catch(() => {})
 
   return NextResponse.json({ ok: true, received: events.length })
 }
