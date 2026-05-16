@@ -1028,6 +1028,10 @@ export default function EmployeePage() {
   const [breakLoading, setBreakLoading] = useState(false)
   const [clockingOut, setClockingOut] = useState(false)
 
+  // ── Extension connectivity ───────────────────────────────────────────────
+  // null = still checking, true = connected, false = not installed/connected
+  const [extConnected, setExtConnected] = useState<boolean | null>(null)
+
   // ── Navigation ──────────────────────────────────────────────────────────
   const [view, setView] = useState<View>("dashboard")
   const [sessions, setSessions] = useState<SessionRecord[]>([])
@@ -1115,6 +1119,40 @@ export default function EmployeePage() {
       window.removeEventListener("trackr:ext_clocked_out", onOut)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // ── Extension connectivity detection ─────────────────────────────────────
+  // Content script sets data-trackr-ext="1" on <html> the instant it loads.
+  // MutationObserver catches it if the content script loads after this effect.
+  useEffect(() => {
+    const check = () => document.documentElement.hasAttribute('data-trackr-ext')
+
+    if (check()) {
+      setExtConnected(true)
+      return
+    }
+
+    const observer = new MutationObserver(() => {
+      if (check()) {
+        setExtConnected(true)
+        observer.disconnect()
+        clearTimeout(fallback)
+      }
+    })
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['data-trackr-ext'],
+    })
+
+    const fallback = setTimeout(() => {
+      observer.disconnect()
+      if (!check()) setExtConnected(false)
+    }, 2000)
+
+    return () => {
+      observer.disconnect()
+      clearTimeout(fallback)
+    }
   }, [])
 
   // ── Live activity poll ───────────────────────────────────────────────────
@@ -1549,64 +1587,275 @@ export default function EmployeePage() {
             <div className="mx-auto max-w-2xl px-6 py-10">
               {/* IDLE */}
               {state === "idle" && (
-                <div className="flex animate-in flex-col items-center gap-8 duration-300 fade-in slide-in-from-bottom-2">
-                  <div className="pt-4 text-center">
-                    <div className="font-mono text-6xl font-bold tracking-tight text-slate-900 tabular-nums sm:text-7xl dark:text-white">
-                      {timeStr}
-                    </div>
-                    <p className="mt-2 text-sm text-slate-400 dark:text-zinc-500">
-                      {dateStr}
-                    </p>
-                  </div>
-                  <div className="text-center">
-                    <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">
-                      {getGreeting()}, {firstName}.
-                    </h1>
-                    <p className="mt-1 text-sm text-slate-500 dark:text-zinc-500">
-                      Ready to start your workday?
-                    </p>
-                  </div>
-                  <button
-                    onClick={handleClockIn}
-                    disabled={!me}
-                    className="group flex items-center gap-3 rounded-2xl bg-amber-400 px-12 py-4 text-lg font-semibold text-zinc-950 transition-all duration-200 hover:bg-amber-300 hover:shadow-xl hover:shadow-amber-400/20 active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    <HugeiconsIcon
-                      icon={PlayIcon}
-                      size={20}
-                      className="text-zinc-950 transition-transform group-hover:scale-110"
-                    />
-                    Clock In
-                  </button>
-                  <div className="flex w-full max-w-md items-center gap-4 rounded-xl border border-slate-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900/50">
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-slate-100 dark:bg-zinc-800">
-                      <HugeiconsIcon
-                        icon={Calendar01Icon}
-                        size={18}
-                        className="text-slate-400 dark:text-zinc-500"
-                      />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="mb-0.5 text-xs tracking-wider text-slate-400 uppercase dark:text-zinc-500">
-                        Session
+                <>
+                  {/* ── Extension install guide (shown until extension connects) ── */}
+                  {extConnected === false && (
+                    <div className="flex animate-in flex-col items-center gap-6 duration-300 fade-in slide-in-from-bottom-2">
+                      {/* Header */}
+                      <div className="text-center">
+                        <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-amber-400/10 ring-1 ring-amber-400/30">
+                          <span className="text-2xl">🧩</span>
+                        </div>
+                        <h1 className="text-xl font-semibold text-slate-900 dark:text-white">
+                          Install the trackR extension
+                        </h1>
+                        <p className="mt-1 text-sm text-slate-500 dark:text-zinc-500">
+                          The browser extension tracks your activity during work
+                          sessions.
+                          <br />
+                          Follow the steps below — it only takes a minute.
+                        </p>
+                      </div>
+
+                      {/* Steps card */}
+                      <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white dark:border-zinc-800 dark:bg-zinc-900/60">
+                        {/* Step 1 — Download */}
+                        <div className="flex items-start gap-4 border-b border-slate-100 p-5 dark:border-zinc-800">
+                          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-amber-400 text-xs font-bold text-zinc-950">
+                            1
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm font-semibold text-slate-800 dark:text-white">
+                              Download the extension
+                            </p>
+                            <p className="mt-0.5 text-xs text-slate-500 dark:text-zinc-500">
+                              Click below to download the extension package.
+                            </p>
+                            <a
+                              href="/trackr-extension.zip"
+                              download="trackr-extension.zip"
+                              className="mt-3 inline-flex items-center gap-2 rounded-lg bg-amber-400 px-4 py-2 text-xs font-semibold text-zinc-950 transition-colors hover:bg-amber-300"
+                            >
+                              <HugeiconsIcon
+                                icon={Activity01Icon}
+                                size={13}
+                                className="text-current"
+                              />
+                              Download trackR Extension
+                            </a>
+                          </div>
+                        </div>
+
+                        {/* Step 2 — Unzip */}
+                        <div className="flex items-start gap-4 border-b border-slate-100 p-5 dark:border-zinc-800">
+                          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-100 text-xs font-bold text-slate-600 dark:bg-zinc-800 dark:text-zinc-300">
+                            2
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm font-semibold text-slate-800 dark:text-white">
+                              Unzip the file
+                            </p>
+                            <p className="mt-0.5 text-xs text-slate-500 dark:text-zinc-500">
+                              Extract the downloaded{" "}
+                              <span className="font-mono text-slate-700 dark:text-zinc-300">
+                                trackr-extension.zip
+                              </span>{" "}
+                              to any folder on your computer.
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Step 3 — Open Extensions */}
+                        <div className="flex items-start gap-4 border-b border-slate-100 p-5 dark:border-zinc-800">
+                          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-100 text-xs font-bold text-slate-600 dark:bg-zinc-800 dark:text-zinc-300">
+                            3
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm font-semibold text-slate-800 dark:text-white">
+                              Open Chrome Extensions
+                            </p>
+                            <p className="mt-0.5 text-xs text-slate-500 dark:text-zinc-500">
+                              In Chrome, paste this into the address bar and
+                              press Enter:
+                            </p>
+                            <div className="mt-2 flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 dark:border-zinc-700 dark:bg-zinc-800">
+                              <code className="flex-1 text-xs text-slate-700 select-all dark:text-zinc-300">
+                                chrome://extensions
+                              </code>
+                              <button
+                                onClick={() =>
+                                  navigator.clipboard.writeText(
+                                    "chrome://extensions"
+                                  )
+                                }
+                                className="shrink-0 rounded text-xs text-slate-400 hover:text-slate-600 dark:hover:text-zinc-200"
+                              >
+                                Copy
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Step 4 — Developer mode */}
+                        <div className="flex items-start gap-4 border-b border-slate-100 p-5 dark:border-zinc-800">
+                          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-100 text-xs font-bold text-slate-600 dark:bg-zinc-800 dark:text-zinc-300">
+                            4
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm font-semibold text-slate-800 dark:text-white">
+                              Enable Developer Mode
+                            </p>
+                            <p className="mt-0.5 text-xs text-slate-500 dark:text-zinc-500">
+                              Toggle{" "}
+                              <span className="font-semibold text-slate-700 dark:text-zinc-300">
+                                Developer mode
+                              </span>{" "}
+                              on in the top-right corner of the extensions page.
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Step 5 — Load unpacked */}
+                        <div className="flex items-start gap-4 border-b border-slate-100 p-5 dark:border-zinc-800">
+                          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-100 text-xs font-bold text-slate-600 dark:bg-zinc-800 dark:text-zinc-300">
+                            5
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm font-semibold text-slate-800 dark:text-white">
+                              Load the extension
+                            </p>
+                            <p className="mt-0.5 text-xs text-slate-500 dark:text-zinc-500">
+                              Click{" "}
+                              <span className="font-semibold text-slate-700 dark:text-zinc-300">
+                                Load unpacked
+                              </span>{" "}
+                              and select the folder you unzipped in step 2.
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Step 6 — Pin it */}
+                        <div className="flex items-start gap-4 border-b border-slate-100 p-5 dark:border-zinc-800">
+                          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-100 text-xs font-bold text-slate-600 dark:bg-zinc-800 dark:text-zinc-300">
+                            6
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm font-semibold text-slate-800 dark:text-white">
+                              Pin the extension
+                            </p>
+                            <p className="mt-0.5 text-xs text-slate-500 dark:text-zinc-500">
+                              Click the puzzle piece icon{" "}
+                              <span className="font-mono text-slate-700 dark:text-zinc-300">
+                                🧩
+                              </span>{" "}
+                              in the Chrome toolbar, find{" "}
+                              <span className="font-semibold text-slate-700 dark:text-zinc-300">
+                                trackR Monitor
+                              </span>
+                              , and click the pin icon. This lets you see your
+                              live tracking status at a glance.
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Step 7 — Reload */}
+                        <div className="flex items-start gap-4 p-5">
+                          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-100 text-xs font-bold text-slate-600 dark:bg-zinc-800 dark:text-zinc-300">
+                            7
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm font-semibold text-slate-800 dark:text-white">
+                              Come back and reload
+                            </p>
+                            <p className="mt-0.5 text-xs text-slate-500 dark:text-zinc-500">
+                              Return to this page and click below. The extension
+                              connects automatically — this page will update and
+                              let you clock in.
+                            </p>
+                            <button
+                              onClick={() => window.location.reload()}
+                              className="mt-3 inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
+                            >
+                              <HugeiconsIcon
+                                icon={RefreshIcon}
+                                size={13}
+                                className="text-current"
+                              />
+                              Reload page
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Note about clocking in */}
+                      <p className="max-w-md text-center text-xs text-slate-400 dark:text-zinc-600">
+                        Once installed, you clock in directly from this
+                        dashboard — not from the extension popup. Pinning just
+                        gives you a live status indicator in your toolbar.
                       </p>
-                      <p className="text-sm font-medium text-slate-800 dark:text-white">
-                        Clock in to start tracking
-                      </p>
-                      <p className="mt-0.5 text-xs text-slate-400 dark:text-zinc-600">
-                        Activity captured once clocked in
-                      </p>
                     </div>
-                    <div className="flex shrink-0 items-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-400">
-                      <HugeiconsIcon
-                        icon={CheckmarkCircle01Icon}
-                        size={14}
-                        className="text-current"
-                      />
-                      <span>Ready</span>
+                  )}
+
+                  {/* ── Normal idle state (extension connected or still checking) ── */}
+                  {extConnected !== false && (
+                    <div className="flex animate-in flex-col items-center gap-8 duration-300 fade-in slide-in-from-bottom-2">
+                      <div className="pt-4 text-center">
+                        <div className="font-mono text-6xl font-bold tracking-tight text-slate-900 tabular-nums sm:text-7xl dark:text-white">
+                          {timeStr}
+                        </div>
+                        <p className="mt-2 text-sm text-slate-400 dark:text-zinc-500">
+                          {dateStr}
+                        </p>
+                      </div>
+                      <div className="text-center">
+                        <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">
+                          {getGreeting()}, {firstName}.
+                        </h1>
+                        <p className="mt-1 text-sm text-slate-500 dark:text-zinc-500">
+                          Ready to start your workday?
+                        </p>
+                      </div>
+                      <button
+                        onClick={handleClockIn}
+                        disabled={!me || extConnected === null}
+                        className="group flex items-center gap-3 rounded-2xl bg-amber-400 px-12 py-4 text-lg font-semibold text-zinc-950 transition-all duration-200 hover:bg-amber-300 hover:shadow-xl hover:shadow-amber-400/20 active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <HugeiconsIcon
+                          icon={PlayIcon}
+                          size={20}
+                          className="text-zinc-950 transition-transform group-hover:scale-110"
+                        />
+                        Clock In
+                      </button>
+                      <div className="flex w-full max-w-md items-center gap-4 rounded-xl border border-slate-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900/50">
+                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-slate-100 dark:bg-zinc-800">
+                          <HugeiconsIcon
+                            icon={Calendar01Icon}
+                            size={18}
+                            className="text-slate-400 dark:text-zinc-500"
+                          />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="mb-0.5 text-xs tracking-wider text-slate-400 uppercase dark:text-zinc-500">
+                            Session
+                          </p>
+                          <p className="text-sm font-medium text-slate-800 dark:text-white">
+                            Clock in to start tracking
+                          </p>
+                          <p className="mt-0.5 text-xs text-slate-400 dark:text-zinc-600">
+                            Activity captured once clocked in
+                          </p>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-1.5 text-xs">
+                          {extConnected === true ? (
+                            <span className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400">
+                              <HugeiconsIcon
+                                icon={CheckmarkCircle01Icon}
+                                size={14}
+                                className="text-current"
+                              />
+                              Extension connected
+                            </span>
+                          ) : (
+                            <span className="text-slate-400 dark:text-zinc-500">
+                              Checking…
+                            </span>
+                          )}
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                </div>
+                  )}
+                </>
               )}
 
               {/* ACTIVE */}
