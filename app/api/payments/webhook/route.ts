@@ -24,6 +24,31 @@ export async function POST(req: Request) {
   const txRef = payload.TransactionRef ?? payload.Body?.transaction_ref
   if (!txRef) return NextResponse.json({ ok: true })
 
+  // Subscription payment
+  if (txRef.startsWith("sub_")) {
+    const payment = await db.subscriptionPayment.findUnique({ where: { squadTxRef: txRef } })
+    if (!payment || payment.status === "confirmed") {
+      return NextResponse.json({ ok: true })
+    }
+
+    const now         = new Date()
+    const periodStart = payment.periodStart
+    const periodEnd   = payment.periodEnd
+
+    await db.subscriptionPayment.update({
+      where: { squadTxRef: txRef },
+      data:  { status: "confirmed", confirmedAt: now },
+    })
+
+    await db.subscription.upsert({
+      where:  { adminId: payment.adminId },
+      update: { plan: payment.plan, status: "active", currentPeriodStart: periodStart, currentPeriodEnd: periodEnd },
+      create: { adminId: payment.adminId, plan: payment.plan, status: "active", currentPeriodStart: periodStart, currentPeriodEnd: periodEnd },
+    })
+
+    return NextResponse.json({ ok: true })
+  }
+
   // Top-up: incoming collection from the admin funding the wallet
   if (txRef.startsWith("topup_")) {
     const existing = await db.walletTopup.findUnique({ where: { squadTxRef: txRef } })

@@ -88,6 +88,33 @@ model Payment {
   @@index([status])
 }
 
+model Subscription {
+  id                 String   @id @default(cuid())
+  adminId            String   @unique
+  plan               String   // "starter" | "growth" | "scale"
+  status             String   // "active" | "expired" | "cancelled"
+  currentPeriodStart DateTime
+  currentPeriodEnd   DateTime
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+}
+
+model SubscriptionPayment {
+  id          String    @id @default(cuid())
+  adminId     String
+  plan        String
+  amountKobo  Int
+  amountNgn   Decimal   @db.Decimal(10, 2)
+  squadTxRef  String    @unique
+  status      String    @default("pending") // pending | confirmed
+  periodStart DateTime
+  periodEnd   DateTime
+  confirmedAt DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([adminId])
+}
+
 model WalletTopup {
   id          String    @id @default(cuid())
   amountKobo  Int

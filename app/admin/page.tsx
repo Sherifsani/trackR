@@ -32,6 +32,9 @@ import {
   CreditCardIcon,
   AiBrain01Icon,
   Analytics01Icon,
+  Crown01Icon,
+  Tick01Icon,
+  ArrowUpDownIcon,
 } from "@hugeicons/core-free-icons"
 import { ThemeToggle } from "@/components/theme-toggle"
 
@@ -803,7 +806,33 @@ function PaymentsTab({
 }
 
 // ── Settings Tab ─────────────────────────────────────────────────────────────
-function SettingsTab({ employees, onSaved }: { employees: Employee[]; onSaved: () => void }) {
+const PLANS_UI = [
+  {
+    id: "starter", name: "Starter", priceNgn: 5_000,
+    description: "Up to 5 employees",
+    features: ["Session tracking", "AI session analysis", "Anomaly detection", "KPI expectations"],
+  },
+  {
+    id: "growth", name: "Growth", priceNgn: 15_000,
+    description: "Up to 20 employees",
+    features: ["Everything in Starter", "30-day pattern insights", "CSV export", "Squad payroll disbursement"],
+    highlight: true,
+  },
+  {
+    id: "scale", name: "Scale", priceNgn: 30_000,
+    description: "Unlimited employees",
+    features: ["Everything in Growth", "Unlimited team size", "Priority support"],
+  },
+] as const
+
+function SettingsTab({
+  employees, onSaved, subscription, onSubscriptionChange,
+}: {
+  employees: Employee[]
+  onSaved: () => void
+  subscription: { plan: string; status: string; currentPeriodEnd: string; daysLeft: number } | null
+  onSubscriptionChange: () => void
+}) {
   const [balance,        setBalance]        = useState<number | null>(null)
   const [acctLoading,    setAcctLoading]    = useState(true)
   const [balanceLoading, setBalanceLoading] = useState(false)
@@ -1437,6 +1466,21 @@ export default function AdminPage() {
   const [insightLoading, setInsightLoading] = useState(false)
   const [insightRefresh, setInsightRefresh] = useState(false)
 
+  // ── Subscription ─────────────────────────────────────────────────────────
+  const [subscription, setSubscription] = useState<{
+    plan: string; status: string; currentPeriodEnd: string; daysLeft: number
+  } | null | undefined>(undefined) // undefined = loading
+
+  const fetchSubscription = useCallback(async () => {
+    try {
+      const res = await fetch("/api/admin/subscription")
+      if (res.ok) {
+        const { subscription: sub } = await res.json()
+        setSubscription(sub ?? null)
+      }
+    } catch {}
+  }, [])
+
   const fetchEmployees = useCallback(async () => {
     try {
       const res = await fetch("/api/admin/employees")
@@ -1457,9 +1501,10 @@ export default function AdminPage() {
       .catch(() => {})
 
     fetchEmployees()
+    fetchSubscription()
     const t = setInterval(fetchEmployees, 30_000)
     return () => clearInterval(t)
-  }, [fetchEmployees])
+  }, [fetchEmployees, fetchSubscription])
 
   useEffect(() => {
     if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("onboarding") === "1") {
@@ -1871,6 +1916,50 @@ export default function AdminPage() {
 
       {/* ── Main ─────────────────────────────────────────────────────────────── */}
       <main className="flex-1 overflow-auto">
+
+        {/* ── Subscription banner ── */}
+        {subscription !== undefined && !subscription && (
+          <div className="border-b border-amber-200 dark:border-amber-400/20 bg-amber-50 dark:bg-amber-400/5 px-6 py-3 flex items-center gap-3">
+            <HugeiconsIcon icon={Crown01Icon} size={15} className="text-amber-500 dark:text-amber-400 shrink-0" />
+            <p className="text-amber-700 dark:text-amber-300 text-sm flex-1">
+              No active subscription. Some features may be limited.
+            </p>
+            <button
+              onClick={() => { setTab("settings"); setDrillEmp(null) }}
+              className="text-xs font-semibold text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-400/30 hover:bg-amber-100 dark:hover:bg-amber-400/10 px-3 py-1.5 rounded-lg transition-colors shrink-0"
+            >
+              Subscribe
+            </button>
+          </div>
+        )}
+        {subscription && subscription.status === "expired" && (
+          <div className="border-b border-red-200 dark:border-red-400/20 bg-red-50 dark:bg-red-400/5 px-6 py-3 flex items-center gap-3">
+            <HugeiconsIcon icon={AlertCircleIcon} size={15} className="text-red-500 dark:text-red-400 shrink-0" />
+            <p className="text-red-700 dark:text-red-300 text-sm flex-1">
+              Your subscription expired. Renew to keep full access.
+            </p>
+            <button
+              onClick={() => { setTab("settings"); setDrillEmp(null) }}
+              className="text-xs font-semibold text-red-700 dark:text-red-300 border border-red-300 dark:border-red-400/30 hover:bg-red-100 dark:hover:bg-red-400/10 px-3 py-1.5 rounded-lg transition-colors shrink-0"
+            >
+              Renew
+            </button>
+          </div>
+        )}
+        {subscription && subscription.status === "active" && subscription.daysLeft <= 5 && (
+          <div className="border-b border-orange-200 dark:border-orange-400/20 bg-orange-50 dark:bg-orange-400/5 px-6 py-3 flex items-center gap-3">
+            <HugeiconsIcon icon={ClockAlertIcon} size={15} className="text-orange-500 dark:text-orange-400 shrink-0" />
+            <p className="text-orange-700 dark:text-orange-300 text-sm flex-1">
+              Your subscription expires in {subscription.daysLeft} day{subscription.daysLeft !== 1 ? "s" : ""}. Renew now to avoid interruption.
+            </p>
+            <button
+              onClick={() => { setTab("settings"); setDrillEmp(null) }}
+              className="text-xs font-semibold text-orange-700 dark:text-orange-300 border border-orange-300 dark:border-orange-400/30 hover:bg-orange-100 dark:hover:bg-orange-400/10 px-3 py-1.5 rounded-lg transition-colors shrink-0"
+            >
+              Renew
+            </button>
+          </div>
+        )}
 
         {/* ── Overview ── */}
         {!drillEmp && tab === "overview" && (
@@ -2698,7 +2787,7 @@ export default function AdminPage() {
 
         {/* ── Settings ── */}
         {!drillEmp && tab === "settings" && (
-          <SettingsTab employees={employees} onSaved={fetchEmployees} />
+          <SettingsTab employees={employees} onSaved={fetchEmployees} subscription={subscription ?? null} onSubscriptionChange={fetchSubscription} />
         )}
 
         {/* ── Insights ── */}
