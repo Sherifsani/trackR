@@ -13,19 +13,21 @@ export async function PATCH(
 
   const { id } = await params
   const body = await req.json() as {
-    hourlyRate?:          number
-    breakMinPerDay?:      number
-    workHoursPerDay?:     number
-    overtimeMultiplier?:  number | null
-    role?:                string
+    hourlyRate?:         number
+    breakMinPerDay?:     number
+    workHoursPerDay?:    number
+    overtimeMultiplier?: number | null
+    role?:               string
+    kpiDescription?:     string | null
   }
 
   const data: Record<string, unknown> = {}
-  if (body.hourlyRate          !== undefined) data.hourlyRate          = body.hourlyRate
-  if (body.breakMinPerDay      !== undefined) data.breakMinPerDay      = body.breakMinPerDay
-  if (body.workHoursPerDay     !== undefined) data.workHoursPerDay     = body.workHoursPerDay
-  if (body.overtimeMultiplier  !== undefined) data.overtimeMultiplier  = body.overtimeMultiplier
-  if (body.role                !== undefined) data.role                = body.role
+  if (body.hourlyRate         !== undefined) data.hourlyRate         = body.hourlyRate
+  if (body.breakMinPerDay     !== undefined) data.breakMinPerDay     = body.breakMinPerDay
+  if (body.workHoursPerDay    !== undefined) data.workHoursPerDay    = body.workHoursPerDay
+  if (body.overtimeMultiplier !== undefined) data.overtimeMultiplier = body.overtimeMultiplier
+  if (body.role               !== undefined) data.role               = body.role
+  if (body.kpiDescription     !== undefined) data.kpiDescription     = body.kpiDescription || null
 
   const emp = await db.employee.update({ where: { id }, data })
 
@@ -36,5 +38,6 @@ export async function PATCH(
     workHoursPerDay:    emp.workHoursPerDay,
     overtimeMultiplier: emp.overtimeMultiplier,
     role:               emp.role,
+    kpiDescription:     emp.kpiDescription,
   })
 }

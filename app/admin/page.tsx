@@ -39,25 +39,26 @@ type TabType = "overview" | "payments" | "sessions" | "settings" | "insights"
 type EmployeeStatus = "active" | "clocked-out" | "absent"
 
 interface Employee {
-  id:                  string
-  apiId:               string
-  name:                string
-  initials:            string
-  role:                string
-  status:              EmployeeStatus
-  clockIn:             string
-  hours:               string
-  weekHours:           number
-  hourlyRate:          number
-  breakMinPerDay:      number
-  workHoursPerDay:     number
-  overtimeMultiplier:  number | null
-  bankVerified:        boolean
-  accountName:         string | null
-  sessionId:           string | null
-  todayNetSec:         number
-  onBreak:             boolean
-  breakUsedSec:        number
+  id:                    string
+  apiId:                 string
+  name:                  string
+  initials:              string
+  role:                  string
+  status:                EmployeeStatus
+  clockIn:               string
+  hours:                 string
+  weekHours:             number
+  hourlyRate:         number
+  breakMinPerDay:     number
+  workHoursPerDay:    number
+  overtimeMultiplier: number | null
+  kpiDescription:     string | null
+  bankVerified:       boolean
+  accountName:           string | null
+  sessionId:             string | null
+  todayNetSec:           number
+  onBreak:               boolean
+  breakUsedSec:          number
 }
 
 interface LiveEmployeeActivity {
@@ -823,7 +824,11 @@ function SettingsTab({ employees, onSaved }: { employees: Employee[]; onSaved: (
   const [empBreaks,     setEmpBreaks]     = useState<Record<string, string>>({})
   const [empWorkHours,  setEmpWorkHours]  = useState<Record<string, string>>({})
   const [empOTMulti,    setEmpOTMulti]    = useState<Record<string, string>>({})
-  const [saving,    setSaving]    = useState<Record<string, boolean>>({})
+  const [saving,        setSaving]        = useState<Record<string, boolean>>({})
+
+  // Per-employee KPI description
+  const [kpiDesc,   setKpiDesc]   = useState<Record<string, string>>({})
+  const [kpiSaving, setKpiSaving] = useState<Record<string, boolean>>({})
 
   const input = "bg-slate-50 dark:bg-zinc-800/60 border border-slate-200 dark:border-zinc-700 focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/20 rounded-lg px-3 py-2 text-slate-900 dark:text-white text-sm outline-none transition-all w-full"
 
@@ -846,16 +851,19 @@ function SettingsTab({ employees, onSaved }: { employees: Employee[]; onSaved: (
     const breaks:     Record<string, string> = {}
     const workHours:  Record<string, string> = {}
     const otMulti:    Record<string, string> = {}
+    const desc: Record<string, string> = {}
     for (const e of employees) {
-      rates[e.id]      = e.hourlyRate         ? String(e.hourlyRate)         : ""
-      breaks[e.id]     = e.breakMinPerDay     ? String(e.breakMinPerDay)     : "60"
-      workHours[e.id]  = String(e.workHoursPerDay ?? 8)
-      otMulti[e.id]    = e.overtimeMultiplier != null ? String(e.overtimeMultiplier) : ""
+      rates[e.id]     = e.hourlyRate         ? String(e.hourlyRate)         : ""
+      breaks[e.id]    = e.breakMinPerDay     ? String(e.breakMinPerDay)     : "60"
+      workHours[e.id] = String(e.workHoursPerDay ?? 8)
+      otMulti[e.id]   = e.overtimeMultiplier != null ? String(e.overtimeMultiplier) : ""
+      desc[e.id]      = e.kpiDescription ?? ""
     }
     setEmpRates(rates)
     setEmpBreaks(breaks)
     setEmpWorkHours(workHours)
     setEmpOTMulti(otMulti)
+    setKpiDesc(desc)
   }, [employees])
 
   const checkBalance = async () => {
@@ -925,6 +933,19 @@ function SettingsTab({ employees, onSaved }: { employees: Employee[]; onSaved: (
       onSaved()
     } catch {}
     setSaving((p) => ({ ...p, [empId]: false }))
+  }
+
+  const saveKpis = async (empId: string) => {
+    setKpiSaving((p) => ({ ...p, [empId]: true }))
+    try {
+      await fetch(`/api/admin/employees/${empId}/settings`, {
+        method:  "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ kpiDescription: kpiDesc[empId] || null }),
+      })
+      onSaved()
+    } catch {}
+    setKpiSaving((p) => ({ ...p, [empId]: false }))
   }
 
   return (
@@ -1148,6 +1169,56 @@ function SettingsTab({ employees, onSaved }: { employees: Employee[]; onSaved: (
                       {saving[emp.id] ? "…" : "Save"}
                     </button>
                   </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* KPI Targets */}
+      <div className="bg-white dark:bg-zinc-900/50 border border-slate-200 dark:border-zinc-800 rounded-2xl overflow-hidden">
+        <div className="px-6 py-4 border-b border-slate-200/80 dark:border-zinc-800/50">
+          <div className="flex items-center gap-2 mb-0.5">
+            <HugeiconsIcon icon={AiBrain01Icon} size={16} className="text-slate-400 dark:text-zinc-500" />
+            <h2 className="text-slate-900 dark:text-white text-sm font-semibold">KPI Expectations</h2>
+          </div>
+          <p className="text-slate-400 dark:text-zinc-600 text-xs">
+            Describe what you expect from each employee in plain language. The AI reads this when analysing every session and 30-day pattern, and tells you whether they met your expectations.
+          </p>
+        </div>
+
+        {employees.length === 0 ? (
+          <div className="flex items-center justify-center py-10">
+            <p className="text-slate-400 dark:text-zinc-600 text-sm">No employees yet</p>
+          </div>
+        ) : (
+          <div className="divide-y divide-slate-100 dark:divide-zinc-800/30">
+            {employees.map((emp, i) => (
+              <div key={emp.id} className="px-6 py-4">
+                <div className="flex items-center gap-3 mb-3">
+                  <Avatar initials={emp.initials} idx={i} sm />
+                  <div>
+                    <p className="text-slate-800 dark:text-zinc-200 text-sm font-medium">{emp.name}</p>
+                    <p className="text-slate-400 dark:text-zinc-600 text-xs">{emp.role || "Employee"}</p>
+                  </div>
+                </div>
+                <textarea
+                  rows={4}
+                  value={kpiDesc[emp.id] ?? ""}
+                  onChange={(e) => setKpiDesc((p) => ({ ...p, [emp.id]: e.target.value }))}
+                  placeholder={`e.g. ${emp.name.split(" ")[0]} should spend at least 70% of their session on development or design work. Off-task browsing should not exceed 10% of tracked time. They should aim for at least 7 billable hours per day and avoid rapid tab-switching — sustained focus blocks of 5+ minutes are expected.`}
+                  className="w-full bg-slate-50 dark:bg-zinc-800/60 border border-slate-200 dark:border-zinc-700 focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/20 rounded-lg px-3 py-2.5 text-slate-900 dark:text-white text-sm outline-none transition-all resize-none leading-relaxed"
+                />
+                <div className="flex justify-end mt-2">
+                  <button
+                    onClick={() => saveKpis(emp.id)}
+                    disabled={kpiSaving[emp.id]}
+                    className="flex items-center gap-1 text-xs font-medium bg-amber-400 hover:bg-amber-300 disabled:opacity-50 text-zinc-950 px-3 py-1.5 rounded-lg transition-colors"
+                  >
+                    <HugeiconsIcon icon={kpiSaving[emp.id] ? RefreshIcon : FloppyDiskIcon} size={12} className={`text-current ${kpiSaving[emp.id] ? "animate-spin" : ""}`} />
+                    {kpiSaving[emp.id] ? "Saving…" : "Save"}
+                  </button>
                 </div>
               </div>
             ))}
@@ -1577,12 +1648,13 @@ export default function AdminPage() {
       breakMinPerDay:     60,
       workHoursPerDay:    8,
       overtimeMultiplier: null,
+      kpiDescription:     null,
       bankVerified:       false,
-      accountName:     null,
-      sessionId:       s.id,
-      todayNetSec:     0,
-      onBreak:         false,
-      breakUsedSec:    0,
+      accountName:           null,
+      sessionId:             s.id,
+      todayNetSec:           0,
+      onBreak:               false,
+      breakUsedSec:          0,
     }
     setDrillEmp(emp)
     setDrillSource("sessions")

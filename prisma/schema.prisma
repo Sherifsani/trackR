@@ -49,6 +49,9 @@ model Employee {
   accountName     String?   // verified name returned by Squad lookup
   bankVerified    Boolean   @default(false)
 
+  // Admin-written KPI expectations (plain text, read by AI during session and pattern analysis)
+  kpiDescription  String?
+
   // AI-generated cross-session work pattern insights
   insightsSummary   Json?
   insightsUpdatedAt DateTime?
